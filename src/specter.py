@@ -184,6 +184,11 @@ class Specter:
             await self.keystore.init(self.gui.show_screen(), self.gui.show_loader)
             # unlock with PIN or set up the PIN code
             await self.unlock()
+            # If keystore already loaded a key (e.g., SeedKeeper auto-load),
+            # skip initmenu and go straight to mainmenu
+            if self.keystore.is_ready:
+                self.init_apps()
+                self.current_menu = self.mainmenu
         except Exception as e:
             next_fn = await self.handle_exception(e, self.setup)
             await next_fn()

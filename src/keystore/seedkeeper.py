@@ -47,6 +47,7 @@ class SeedKeeper(RAMKeyStore):
             return True
         except Exception as e:
             print(e)
+            cls.connection.disconnect()
             return False
 
     @property
@@ -102,6 +103,18 @@ class SeedKeeper(RAMKeyStore):
             if "6983" in str(e) or "9c0c" in str(e):
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             raise
+    async def unlock(self):
+        """Override: after PIN verification, auto-load first secret."""
+        await super().unlock()
+        # PIN verified — auto-load first secret from card
+        try:
+            self.show_loader("Loading secret from the card...")
+            mnemonic = self.applet.get_bip39_secret()
+            self.set_mnemonic(mnemonic, "")
+            print("[SeedKeeper] Key loaded automatically after PIN")
+        except Exception as e:
+            print("[SeedKeeper] Auto-load failed:", e)
+            # Fall through to initmenu — user can retry manually
 
     async def check_card(self, check_pin=False):
         """Check card presence and connect if needed."""
