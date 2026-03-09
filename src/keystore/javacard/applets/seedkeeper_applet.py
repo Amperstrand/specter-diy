@@ -259,20 +259,40 @@ class SeedKeeperApplet(Applet):
             print("[SeedKeeper] No BIP39/MASTERSEED secrets found")
             raise AppletException("No BIP39 or MASTERSEED secrets found on card")
 
-        print("[SeedKeeper] Found BIP39 secret, id:", bip39_header['id'], "label:", bip39_header['label'])
+        print("[SeedKeeper] Found secret, id:", bip39_header['id'], "type:", hex(bip39_header['type']), "label:", bip39_header['label'])
 
         # Export the secret
         secret_data = self.export_secret(bip39_header['id'])
 
-        # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
-        if len(secret_data) >= 2:
-            entropy_len = (secret_data[0] << 8) | secret_data[1]
-            entropy = secret_data[2:2 + entropy_len]
-            print("[SeedKeeper] Entropy length:", entropy_len)
+        # Parse based on secret type
+        if bip39_header['type'] == self.SECRET_TYPE_MASTERSEED:
+            # MASTERSEED format (type 0x10 with BIP39 subtype):
+            # masterseed_size(1) || masterseed(64) || wordlist(1) || entropy_size(1) || entropy(32) || ...
+            # Entropy is at offset 67-98 (after 1+64+1+1 bytes)
+            print("[SeedKeeper] Parsing MASTERSEED format...")
+            if len(secret_data) >= 99:
+                masterseed_size = secret_data[0]
+                wordlist = secret_data[65]
+                entropy_size = secret_data[66]
+                entropy = secret_data[67:67 + entropy_size]
+                print("[SeedKeeper] MASTERSEED: masterseed_size=", masterseed_size, "wordlist=", wordlist, "entropy_size=", entropy_size)
+                print("[SeedKeeper] Entropy (hex):", ''.join('{:02x}'.format(b) for b in entropy))
+                mnemonic = bip39.mnemonic_from_bytes(entropy)
+                print("[SeedKeeper] Successfully converted to mnemonic")
+                return mnemonic
+            else:
+                raise AppletException("Invalid MASTERSEED secret format (too short)")
+        else:
+            # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
+            print("[SeedKeeper] Parsing BIP39 format...")
+            if len(secret_data) >= 2:
+                entropy_len = (secret_data[0] << 8) | secret_data[1]
+                entropy = secret_data[2:2 + entropy_len]
+                print("[SeedKeeper] Entropy length:", entropy_len)
 
-            # Convert to mnemonic
-            mnemonic = bip39.mnemonic_from_bytes(entropy)
-            print("[SeedKeeper] Successfully converted to mnemonic")
-            return mnemonic
+                # Convert to mnemonic
+                mnemonic = bip39.mnemonic_from_bytes(entropy)
+                print("[SeedKeeper] Successfully converted to mnemonic")
+                return mnemonic
 
         raise AppletException("Invalid BIP39 secret format")
