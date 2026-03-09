@@ -54,9 +54,12 @@ pyb.ExtInt(pyb.Pin('B1'), pyb.ExtInt.IRQ_FALLING, pyb.Pin.PULL_NONE, pwrcb)
 # pyb.usb_mode("VCP+MSC") # debug mode with USB and mounted storages from start
 # pyb.usb_mode("VCP") # debug mode with USB from start
 # disable at start
-pyb.usb_mode(None)
-os.dupterm(None,0)
-os.dupterm(None,1)
+#
+pyb.usb_mode(None)  # Disabled for debug - need REPL
+pyb.usb_mode("VCP")  # Enable VCP for mpremote REPL access
+#
+# os.dupterm(None,0)  # Disabled for debug - REPL needs dupterm
+# os.dupterm(None,1)  # Disabled for debug
 
 # inject version and i2c to platform module
 import platform
