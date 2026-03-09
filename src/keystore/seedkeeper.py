@@ -79,10 +79,23 @@ class SeedKeeper(RAMKeyStore):
             if attempts is not None:
                 raise PinError("Invalid PIN!\n%d attempts left..." % attempts)
         except ISOException as e:
-            # Handle specific ISO exceptions
-            if str(e) == "9c0c" or str(e) == "6983":
-                # Card is bricked - no more attempts
+            # Handle specific ISO exceptions based on status word
+            sw = str(e).lower()
+            # Card is bricked - no more attempts
+            if sw == "9c0c" or sw == "6983":
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
+            # Wrong PIN: SW = 63Cx where x = remaining attempts
+            if sw.startswith("63c") and len(sw) == 4:
+                try:
+                    attempts_left = int(sw[3], 16)
+                except ValueError:
+                    attempts_left = None
+                if attempts_left is not None:
+                    raise PinError(
+                        "Invalid PIN!\n%d attempts left..." % attempts_left
+                    )
+                raise PinError("Invalid PIN!")
+            # Any other ISO error is unexpected here
             raise
         except AppletException as e:
             # Handle applet-level exceptions
