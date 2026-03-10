@@ -58,6 +58,7 @@ def main(apps=None, network="main", keystore_cls=None):
     if keystore_cls is not None:
         keystores = [keystore_cls]
     else:
+        print('[BootTrace] Keystore probe order:', [k.__name__ for k in [MemoryCard, SeedKeeper, SDKeyStore]])
         keystores = [
             MemoryCard,
             SeedKeeper,

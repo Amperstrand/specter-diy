@@ -49,6 +49,7 @@ In this mode device can only operate when the smartcard is inserted!"""
 
     @classmethod
     def is_available(cls):
+        print('[BootTrace][MemoryCard] is_available() called')
         if not cls.connection.isCardInserted():
             return False
         try:
@@ -57,11 +58,12 @@ In this mode device can only operate when the smartcard is inserted!"""
             applet.select()
             applet.open_secure_channel()
             cls.connection.disconnect()
+            print('[BootTrace][MemoryCard] is_available = True')
             return True
         except Exception as e:
-            print(e)
+            print('[BootTrace][MemoryCard] Probe failed:', e)
+            cls.connection.disconnect()
             return False
-
 
     def get_auth_word(self, pin_part):
         """

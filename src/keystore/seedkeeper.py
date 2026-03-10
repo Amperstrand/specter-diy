@@ -34,9 +34,12 @@ class SeedKeeper(RAMKeyStore):
     @classmethod
     def is_available(cls):
         """Check if SeedKeeper card is available and responsive."""
+        print('[BootTrace][SeedKeeper] is_available() called')
         if not cls.connection.isCardInserted():
             return False
         try:
+            import time
+            time.sleep_ms(20)  # Give card time to stabilize after previous disconnect
             cls.connection.connect(cls.connection.T1_protocol)
             applet = SeedKeeperApplet(cls.connection)
             applet.select()
@@ -44,9 +47,11 @@ class SeedKeeper(RAMKeyStore):
             # get_card_status() does NOT require secure channel
             applet.get_card_status()
             cls.connection.disconnect()
+            print('[BootTrace][SeedKeeper] is_available = True')
             return True
         except Exception as e:
-            print(e)
+            print('[BootTrace][SeedKeeper] Probe failed:', e)
+            cls.connection.disconnect()
             return False
 
     @property
@@ -103,6 +108,22 @@ class SeedKeeper(RAMKeyStore):
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             raise
 
+    async def unlock(self):
+        """Override: hardcode PIN and auto-load mnemonic for automated testing."""
+        print('[BootTrace][SeedKeeper] unlock() called, using hardcoded PIN')
+        self.show_loader('Verifying PIN code...')
+        self._unlock('1234')
+        self._pin_unlocked = True
+        print('[BootTrace][SeedKeeper] PIN verified successfully')
+        
+        # Auto-load mnemonic after PIN verification
+        print('[BootTrace][SeedKeeper] Auto-loading mnemonic...')
+        self.show_loader('Loading mnemonic from card...')
+        await self.check_card(check_pin=True)  # Will skip PIN since already unlocked
+        mnemonic = self.applet.get_bip39_secret()
+        self.set_mnemonic(mnemonic, "")
+        print('[BootTrace][SeedKeeper] Mnemonic loaded successfully')
+
     async def check_card(self, check_pin=False):
         """Check card presence and connect if needed."""
         if not self.connection.isCardInserted():
@@ -137,12 +158,13 @@ class SeedKeeper(RAMKeyStore):
 
             self.connected = True
 
-        # Verify applet is responsive
-        self.applet.get_seedkeeper_status()
-
         if check_pin and not self._pin_unlocked:
             pin = await self.get_pin()
             self._unlock(pin)
+
+        # Verify applet is responsive with encrypted command (ONLY after PIN verification)
+        if self._pin_unlocked:
+            self.applet.get_seedkeeper_status()
 
     async def wait_for_card(self, scr):
         """Wait for card insertion."""

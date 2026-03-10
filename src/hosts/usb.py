@@ -32,10 +32,13 @@ class USBHost(Host):
                 print("Connect to 127.0.0.1:8789 to do USB communication")
 
     def load_settings(self, *args, **kwargs):
+        old_enabled = self.is_enabled
         super().load_settings(*args, **kwargs)
-        if self.is_enabled:
+        # Only change USB mode if the enabled state actually changed
+        # This prevents resetting USB on first boot with new keystore
+        if self.is_enabled and not old_enabled:
             platform.enable_usb()
-        else:
+        elif not self.is_enabled and old_enabled:
             platform.disable_usb()
 
     async def enable(self):

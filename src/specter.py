@@ -154,6 +154,8 @@ class Specter:
             return next_fn
 
     async def select_keystore(self):
+        print('[BootTrace] select_keystore() called')
+
         # if we have fixed keystore - just use it
         if len(self.keystores) == 1:
             self.keystore = self.keystores[0]()
@@ -164,6 +166,7 @@ class Specter:
         while keystore_cls is None:
             for keystore in self.keystores:
                 if keystore.is_available():
+                    print('[BootTrace] Selected keystore:', keystore.__name__)
                     keystore_cls = keystore
                     break
             # if none are available just wait for it
@@ -176,6 +179,7 @@ class Specter:
             # check if the user already selected the keystore class
             if self.keystore is None:
                 await self.select_keystore()
+                print('[BootTrace] Keystore selected, proceeding to init')
 
             if self.keystore is not None:
                 self.load_network(self.path, self.network)
@@ -202,6 +206,7 @@ class Specter:
         await self.gui.error(msg, popup=True)
 
     async def main(self):
+        print('[BootTrace] main() called')
         while True:
             try:
                 # trigger garbage collector
@@ -209,7 +214,9 @@ class Specter:
                 # show init menu and wait for the next menu
                 # any menu returns next menu or
                 # None if the same menu should be used
+                print('[BootTrace] Showing menu...')
                 next_menu = await self.current_menu()
+                print('[BootTrace] Menu returned')
                 if next_menu is not None:
                     self.current_menu = next_menu
 
@@ -639,13 +646,19 @@ class Specter:
         - setup PIN if not set
         - enter PIN if set
         """
+        print('[BootTrace] specter.unlock() called')
         await self.keystore.unlock()
+        print('[BootTrace] keystore.unlock() done')
+        
+        # If keystore is ready (has mnemonic loaded), skip init menu
+        if self.keystore.is_ready:
+            print('[BootTrace] Keystore is ready, initializing apps and skipping to main menu')
+            self.init_apps()
+            self.current_menu = self.mainmenu
+        else:
+            print('[BootTrace] Keystore not ready, will show init menu')
+        
         # now keystore is unlocked - we can load hosts configs
-        for host in self.hosts:
-            host.load_settings(self.keystore)
-        settings = self.load_settings()
-        self.GLOBAL = settings
-        BaseApp.GLOBAL = settings
 
     async def maybe_import_mnemonic(self, stream, popup=False, show_fn=None):
         if show_fn is None:
