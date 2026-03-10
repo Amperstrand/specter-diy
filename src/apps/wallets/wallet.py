@@ -116,7 +116,9 @@ class Wallet:
         maybe_mkdir(self.path)
         desc = str(self.descriptor)
         keystore.save_aead(self.path + "/descriptor", plaintext=desc.encode())
-        obj = {"gaps": self.gaps, "name": self.name, "unused_recv": self.unused_recv}
+        obj = {"gaps": self.gaps, "unused_recv": self.unused_recv}
+        if getattr(keystore, "NAME", "") != "SeedKeeper":
+            obj["name"] = self.name
         meta = json.dumps(obj).encode()
         keystore.save_aead(self.path + "/meta", plaintext=meta)
 
@@ -325,7 +327,9 @@ class Wallet:
         obj = json.loads(meta.decode())
         if "gaps" in obj:
             w.gaps = obj["gaps"]
-        if "name" in obj:
+        if getattr(keystore, "NAME", "") == "SeedKeeper":
+            w.name = getattr(keystore, "wallet_label", "SeedKeeper") or "SeedKeeper"
+        elif "name" in obj:
             w.name = obj["name"]
         if "unused_recv" in obj:
             w.unused_recv = obj["unused_recv"]

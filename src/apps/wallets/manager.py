@@ -1,5 +1,5 @@
 from app import BaseApp
-from gui.screens import Menu, InputScreen, Prompt, TransactionScreen
+from gui.screens import Menu, InputScreen, Prompt, TransactionScreen, Alert
 from .screens import WalletScreen, ConfirmWalletScreen
 
 import platform
@@ -131,8 +131,15 @@ class WalletManager(BaseApp):
                 )
                 name = await show_screen(scr)
                 if name is not None and name != w.name and name != "":
-                    w.name = name
-                    w.save(self.keystore)
+                    if getattr(self.keystore, "NAME", "") == "SeedKeeper":
+                        try:
+                            self.keystore.set_wallet_label_on_card(name)
+                            w.name = self.keystore.wallet_label
+                        except Exception as e:
+                            await show_screen(Alert("Error", "Failed to update SeedKeeper label:\n%s" % str(e)))
+                    else:
+                        w.name = name
+                        w.save(self.keystore)
             return True
 
     def can_process(self, stream):
@@ -523,7 +530,19 @@ class WalletManager(BaseApp):
             der[1:],
             xpub.to_base58(self.Networks[self.network]["xpub"]),
         )
-        w = self.WalletClass.parse("Default&"+desc, path)
+        if getattr(self.keystore, "NAME", "") == "SeedKeeper":
+            display_name = getattr(self.keystore, "wallet_label", "SeedKeeper") or "SeedKeeper"
+            display_name = display_name.replace('&', '_')
+            print('[WalletManager] Creating SeedKeeper wallet (display name from card):', display_name)
+            w = self.WalletClass.parse(desc, path)
+            w.name = display_name
+        else:
+            name = getattr(self.keystore, 'wallet_label', 'Default')
+            name = name.replace('&', '_')
+            if not name:
+                name = 'Default'
+            print('[WalletManager] Creating wallet with name:', name)
+            w = self.WalletClass.parse(name+'&'+desc, path)
         # pass keystore to encrypt data
         w.save(self.keystore)
         platform.sync()

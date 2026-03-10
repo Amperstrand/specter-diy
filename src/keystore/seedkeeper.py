@@ -30,13 +30,30 @@ class SeedKeeper(RAMKeyStore):
         self.applet = SeedKeeperApplet(self.connection)
         self._pin_unlocked = False
         self.connected = False
+        self.wallet_label = "SeedKeeper"
+        self.selected_secret_id = None
+
+    def _sanitize_wallet_label(self, label):
+        if not label:
+            return "SeedKeeper"
+        return label.replace("&", "_")
+
+    def set_wallet_label_on_card(self, label):
+        clean = self._sanitize_wallet_label(label)
+        self.applet.set_card_label(clean)
+        self.wallet_label = clean
+        print('[BootTrace][SeedKeeper] Card label updated to:', clean)
+        return clean
 
     @classmethod
     def is_available(cls):
         """Check if SeedKeeper card is available and responsive."""
+        print('[BootTrace][SeedKeeper] is_available() called')
         if not cls.connection.isCardInserted():
             return False
         try:
+            import time
+            time.sleep_ms(20)  # Give card time to stabilize after previous disconnect
             cls.connection.connect(cls.connection.T1_protocol)
             applet = SeedKeeperApplet(cls.connection)
             applet.select()
@@ -44,9 +61,10 @@ class SeedKeeper(RAMKeyStore):
             # get_card_status() does NOT require secure channel
             applet.get_card_status()
             cls.connection.disconnect()
+            print('[BootTrace][SeedKeeper] is_available = True')
             return True
         except Exception as e:
-            print(e)
+            print('[BootTrace][SeedKeeper] Probe failed:', e)
             cls.connection.disconnect()
             return False
 
@@ -104,17 +122,115 @@ class SeedKeeper(RAMKeyStore):
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             raise
     async def unlock(self):
-        """Override: after PIN verification, auto-load first secret."""
-        await super().unlock()
-        # PIN verified — auto-load first secret from card
+        """Override: prompt for PIN via touchscreen, then auto-load mnemonic."""
+        print('[BootTrace][SeedKeeper] unlock() called')
+        
+        # Establish secure channel before PIN verification
+        await self.check_card(check_pin=False)
+        
+        # Query card for PIN attempts remaining (byte 4 of card_status response)
+        # get_card_status() works WITHOUT secure channel
+        pin_attempts = None
         try:
-            self.show_loader("Loading secret from the card...")
-            mnemonic = self.applet.get_bip39_secret()
-            self.set_mnemonic(mnemonic, "")
-            print("[SeedKeeper] Key loaded automatically after PIN")
+            resp_data, sw1, sw2 = self.applet.get_card_status()
+            if len(resp_data) >= 8:
+                pin_attempts = resp_data[4]
+                print('[BootTrace][SeedKeeper] PIN attempts remaining:', pin_attempts)
         except Exception as e:
-            print("[SeedKeeper] Auto-load failed:", e)
-            # Fall through to initmenu — user can retry manually
+            print('[BootTrace][SeedKeeper] Failed to get card status:', e)
+        
+        # PIN prompt loop with error handling
+        while self.is_locked:
+            # Build note with attempts info
+            note = None
+            if pin_attempts is not None:
+                note = "%d PIN attempts remaining" % pin_attempts
+            
+            pin = await self.get_pin(
+                subtitle="SeedKeeper card detected",
+                note=note,
+            )
+            self.show_loader('Verifying PIN code...')
+            try:
+                self._unlock(pin)
+            except PinError as e:
+                # Wrong PIN - show error alert, then loop back to PIN screen
+                await self.show(Alert('PIN Error', str(e)))
+                # Re-query card for updated attempts
+                try:
+                    resp_data, sw1, sw2 = self.applet.get_card_status()
+                    if len(resp_data) >= 8:
+                        pin_attempts = resp_data[4]
+                        print('[BootTrace][SeedKeeper] PIN attempts remaining:', pin_attempts)
+                except:
+                    pass
+                continue
+            # CriticalErrorWipeImmediately is NOT caught - propagates up correctly
+        
+        # Set enc_secret manually (base class is_locked hack is bypassed by our override)
+        from helpers import tagged_hash
+        self.enc_secret = tagged_hash('enc', self.secret)
+        
+        print('[BootTrace][SeedKeeper] PIN verified successfully')
+
+        # Multi-secret support: list and select BIP39-capable secrets
+        try:
+            headers = self.applet.list_secret_headers()
+            for h in headers:
+                print('[BootTrace][SeedKeeper] Header:',
+                      'id=', h.get('id'),
+                      'type=', hex(h.get('type')),
+                      'subtype=', h.get('subtype'),
+                      'label=', h.get('label'),
+                      'fp=', h.get('fingerprint'),
+                      'nb_plain=', h.get('export_nbplain'),
+                      'nb_secure=', h.get('export_nbsecure'),
+                      'counter=', h.get('export_counter'))
+            bip39_headers = [
+                h for h in headers
+                if h['type'] in (0x10, 0x30, 0x31) 
+                and (h['type'] != 0x10 or h.get('subtype') == 1)
+            ]
+            print('[BootTrace][SeedKeeper] Found %d BIP39 secrets' % len(bip39_headers))
+            
+            # Handle secret selection
+            if len(bip39_headers) == 0:
+                await self.show(Alert('Error', 'No BIP39 secrets found on card'))
+                return  # is_ready stays False, returns to boot init menu
+            
+            elif len(bip39_headers) == 1:
+                # Auto-select single secret
+                selected = bip39_headers[0]
+                print('[BootTrace][SeedKeeper] Selected secret id:', selected['id'], 'label:', selected['label'])
+            else:
+                # Show menu for multi-secret selection (no back button - must select)
+                buttons = [(h['id'], h['label'] if h['label'] else 'Secret #%d' % h['id']) for h in bip39_headers]
+                selected_id = await self.show(Menu(buttons, title='Select secret'))
+                selected = next(h for h in bip39_headers if h['id'] == selected_id)
+                print('[BootTrace][SeedKeeper] Selected secret id:', selected['id'], 'label:', selected['label'])
+            
+            card_label = ''
+            try:
+                card_label = self.applet.get_card_label()
+            except Exception as e:
+                print('[BootTrace][SeedKeeper] Card label read failed:', e)
+
+            selected_label = selected['label'] if selected['label'] else 'SeedKeeper'
+            self.wallet_label = self._sanitize_wallet_label(card_label or selected_label)
+            self.selected_secret_id = selected['id']
+            print('[BootTrace][SeedKeeper] Using secret id:', selected['id'], 'label:', selected['label'])
+            print('[BootTrace][SeedKeeper] Effective wallet label:', self.wallet_label)
+            
+            # Load mnemonic from selected secret
+            self.show_loader('Loading mnemonic from card...')
+            mnemonic = self.applet.get_bip39_secret(secret_id=selected['id'], secret_type=selected['type'])
+            self.set_mnemonic(mnemonic, "")
+            print('[BootTrace][SeedKeeper] Mnemonic loaded successfully')
+            
+        except AppletException as e:
+            # Failed to load mnemonic - show error and let boot continue to init menu
+            await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+            # is_ready stays False since fingerprint is not set
 
     async def check_card(self, check_pin=False):
         """Check card presence and connect if needed."""
@@ -150,8 +266,9 @@ class SeedKeeper(RAMKeyStore):
 
             self.connected = True
 
-        # Verify applet is responsive
-        self.applet.get_seedkeeper_status()
+        # Verify applet is responsive with encrypted command (ONLY after PIN verification)
+        if self._pin_unlocked:
+            self.applet.get_seedkeeper_status()
 
         if check_pin and not self._pin_unlocked:
             pin = await self.get_pin()
@@ -181,6 +298,69 @@ class SeedKeeper(RAMKeyStore):
         """Load mnemonic from SeedKeeper card."""
         await self.check_card(check_pin=True)
         self.show_loader("Loading secret from the card...")
+        
+        # Multi-secret support: list and select BIP39-capable secrets
+        try:
+            headers = self.applet.list_secret_headers()
+            for h in headers:
+                print('[SeedKeeper] Header:',
+                      'id=', h.get('id'),
+                      'type=', hex(h.get('type')),
+                      'subtype=', h.get('subtype'),
+                      'label=', h.get('label'),
+                      'fp=', h.get('fingerprint'),
+                      'nb_plain=', h.get('export_nbplain'),
+                      'nb_secure=', h.get('export_nbsecure'),
+                      'counter=', h.get('export_counter'))
+            bip39_headers = [
+                h for h in headers
+                if h['type'] in (0x10, 0x30, 0x31) 
+                and (h['type'] != 0x10 or h.get('subtype') == 1)
+            ]
+            print('[SeedKeeper] Found %d BIP39 secrets' % len(bip39_headers))
+            
+            # Handle secret selection
+            if len(bip39_headers) == 0:
+                await self.show(Alert('Error', 'No BIP39 secrets found on card'))
+                return False
+            
+            elif len(bip39_headers) == 1:
+                # Auto-select single secret
+                selected = bip39_headers[0]
+                print('[SeedKeeper] Selected secret id:', selected['id'], 'label:', selected['label'])
+            else:
+                # Show menu for multi-secret selection
+                buttons = [(h['id'], h['label'] if h['label'] else 'Secret #%d' % h['id']) for h in bip39_headers]
+                selected_id = await self.show(Menu(buttons, title='Select secret', last=(255, None)))
+                if selected_id == 255:  # Back/cancel
+                    return False
+                selected = next(h for h in bip39_headers if h['id'] == selected_id)
+                print('[SeedKeeper] Selected secret id:', selected['id'], 'label:', selected['label'])
+            
+            card_label = ''
+            try:
+                card_label = self.applet.get_card_label()
+            except Exception as e:
+                print('[SeedKeeper] Card label read failed:', e)
+
+            selected_label = selected['label'] if selected['label'] else 'SeedKeeper'
+            self.wallet_label = self._sanitize_wallet_label(card_label or selected_label)
+            self.selected_secret_id = selected['id']
+            print('[SeedKeeper] Effective wallet label:', self.wallet_label)
+            
+            # Load mnemonic from selected secret
+            mnemonic = self.applet.get_bip39_secret(secret_id=selected['id'], secret_type=selected['type'])
+            self.set_mnemonic(mnemonic, "")
+            
+        except AppletException as e:
+            await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+            return False
+        
+        print("[SeedKeeper] Loaded mnemonic successfully")
+        return True
+        """Load mnemonic from SeedKeeper card."""
+        await self.check_card(check_pin=True)
+        self.show_loader("Loading secret from the card...")
         mnemonic = self.applet.get_bip39_secret()
         self.set_mnemonic(mnemonic, "")
         print("[SeedKeeper] Loaded mnemonic successfully")
@@ -195,12 +375,12 @@ class SeedKeeper(RAMKeyStore):
         """SeedKeeper always has a key saved (on the card)."""
         return self._pin_unlocked
 
-    async def get_pin(self, title="Enter your PIN code", with_cancel=False):
+    async def get_pin(self, title="Enter your PIN code", subtitle=None, note=None, with_cancel=False):
         """
         Override to NOT pass get_word parameter.
         SeedKeeper doesn't support anti-phishing words.
         """
-        scr = PinScreen(title=title, note=None, get_word=None, with_cancel=with_cancel)
+        scr = PinScreen(title=title, note=note, get_word=None, subtitle=subtitle, with_cancel=with_cancel)
         return await self.show(scr)
 
     async def storage_menu(self):
