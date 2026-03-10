@@ -5,6 +5,9 @@ from .javacard.applets.applet import ISOException, AppletException
 from .javacard.util import get_connection
 from platform import CriticalErrorWipeImmediately
 import asyncio
+from binascii import hexlify
+
+
 from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
 
 
@@ -69,6 +72,11 @@ class SeedKeeper(RAMKeyStore):
         """Returns True if connected, unlocked, and has a fingerprint."""
         return self.connected and self._pin_unlocked and self.fingerprint is not None
 
+    @property
+    def hexid(self):
+        """Return BIP32 master fingerprint as hex string."""
+        return hexlify(self.fingerprint).decode() if self.fingerprint else 'unknown'
+
     def _unlock(self, pin):
         """
         Unlock the keystore by verifying PIN on the card.
@@ -109,21 +117,34 @@ class SeedKeeper(RAMKeyStore):
             raise
 
     async def unlock(self):
-        """Override: hardcode PIN and auto-load mnemonic for automated testing."""
-        print('[BootTrace][SeedKeeper] unlock() called, using hardcoded PIN')
-        self.show_loader('Verifying PIN code...')
-        self._unlock('1234')
-        self._pin_unlocked = True
-        print('[BootTrace][SeedKeeper] PIN verified successfully')
+        """Override: prompt for PIN via touchscreen, then auto-load mnemonic."""
+        print('[BootTrace][SeedKeeper] unlock() called')
         
+        # Establish secure channel before PIN verification
+        await self.check_card(check_pin=False)
+        
+        # PIN prompt loop (matches RAMKeyStore.unlock() pattern)
+        while self.is_locked:
+            pin = await self.get_pin()
+            self.show_loader('Verifying PIN code...')
+            self._unlock(pin)
+        
+        # Set enc_secret manually (base class is_locked hack is bypassed by our override)
+        from helpers import tagged_hash
+        self.enc_secret = tagged_hash('enc', self.secret)
+        
+        print('[BootTrace][SeedKeeper] PIN verified successfully')
         # Auto-load mnemonic after PIN verification
         print('[BootTrace][SeedKeeper] Auto-loading mnemonic...')
         self.show_loader('Loading mnemonic from card...')
-        await self.check_card(check_pin=True)  # Will skip PIN since already unlocked
-        mnemonic = self.applet.get_bip39_secret()
-        self.set_mnemonic(mnemonic, "")
-        print('[BootTrace][SeedKeeper] Mnemonic loaded successfully')
-
+        try:
+            mnemonic = self.applet.get_bip39_secret()
+            self.set_mnemonic(mnemonic, "")
+            print('[BootTrace][SeedKeeper] Mnemonic loaded successfully')
+        except AppletException as e:
+            # Failed to load mnemonic - show error and let boot continue to init menu
+            await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+            # is_ready stays False since fingerprint is not set
     async def check_card(self, check_pin=False):
         """Check card presence and connect if needed."""
         if not self.connection.isCardInserted():
@@ -225,7 +246,7 @@ class SeedKeeper(RAMKeyStore):
         # we stay in this menu until back is pressed
         while True:
             # wait for menu selection
-            menuitem = await self.show(Menu(buttons, last=(255, None)))
+            menuitem = await self.show(Menu(buttons, note="Key fingerprint: %s" % self.hexid, last=(255, None)))
             # process the menu button:
             # back button
             if menuitem == 255:
@@ -245,12 +266,38 @@ class SeedKeeper(RAMKeyStore):
         """Display card information."""
         try:
             status = self.applet.get_seedkeeper_status()
+            
+            # Try to get secret label
+            secret_label = None
+            try:
+                headers = self.applet.list_secret_headers()
+                if headers and len(headers) > 0:
+                    secret_label = headers[0].get('label', None)
+            except:
+                pass  # Label is optional
+            
+            # Build properties list
             props = [
                 "\n#7f8fa4 CARD INFO: #",
                 "Card name: SeedKeeper",
                 "Secrets stored: %d" % status.get("nb_secrets", 0),
             ]
-            scr = Alert("SeedKeeper info", "\n\n".join(props))
+            
+            # Add secret label if available
+            if secret_label:
+                props.append("Secret label: %s" % secret_label)
+            
+            # Add memory usage
+            total_mem = status.get("total_memory", 0)
+            free_mem = status.get("free_memory", 0)
+            if total_mem > 0:
+                used_mem = total_mem - free_mem
+                props.append("Memory: %d / %d bytes" % (used_mem, total_mem))
+            
+            # Show fingerprint in note parameter
+            note = "Key fingerprint: %s" % self.hexid
+            
+            scr = Alert("SeedKeeper info", "\n\n".join(props), note=note)
             scr.message.set_recolor(True)
             await self.show(scr)
         except Exception as e:
