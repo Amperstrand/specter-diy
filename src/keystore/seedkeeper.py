@@ -57,8 +57,6 @@ class SeedKeeper(RAMKeyStore):
             cls.connection.connect(cls.connection.T1_protocol)
             applet = SeedKeeperApplet(cls.connection)
             applet.select()
-            # Check card status (byte 11 = needs_secure_channel flag)
-            # get_card_status() does NOT require secure channel
             applet.get_card_status()
             cls.connection.disconnect()
             print('[BootTrace][SeedKeeper] is_available = True')
@@ -248,21 +246,39 @@ class SeedKeeper(RAMKeyStore):
         # If not connected, we'll reconnect
         if not self.connected:
             self.show_loader(title="Connecting to the card...")
-            # connect and select applet
-            try:
-                self.connection.connect(self.connection.T1_protocol)
-            except:
-                raise KeyStoreError("Failed to communicate with the card.")
+            connect_error = None
+            protocols = [self.connection.T1_protocol]
+            if hasattr(self.connection, "T0_protocol"):
+                protocols.append(self.connection.T0_protocol)
+            for protocol in protocols:
+                try:
+                    import time
+                    try:
+                        self.connection.disconnect()
+                    except Exception:
+                        pass
+                    time.sleep_ms(50)
+                    self.connection.connect(protocol)
+                    connect_error = None
+                    print('[BootTrace][SeedKeeper] connected using protocol:', protocol)
+                    break
+                except Exception as e:
+                    connect_error = e
+                    print('[BootTrace][SeedKeeper] connect failed:', type(e).__name__, e)
+            if connect_error is not None:
+                raise KeyStoreError("Failed to communicate with the card: %s" % str(connect_error))
             try:
                 self.applet.select()
-            except:
+            except Exception as e:
+                print('[BootTrace][SeedKeeper] select failed:', type(e).__name__, e)
                 raise KeyStoreError("Failed to select the applet")
 
-            # CRITICAL: select() MUST be called BEFORE init_secure_channel(). NEVER after.
-            # SELECT resets secure channel, so the order is:
-            # connect → select → get_card_status() → init_secure_channel()
             self.show_loader(title="Establishing secure channel...")
-            self.applet.init_secure_channel()
+            try:
+                self.applet.init_secure_channel()
+            except Exception as e:
+                print('[BootTrace][SeedKeeper] secure channel init failed:', type(e).__name__, e)
+                raise
 
             self.connected = True
 
