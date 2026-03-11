@@ -232,3 +232,25 @@ class JavaCardKeyStore(RAMKeyStore):
         
         await self.check_card()
         # Subclasses should call super().init() for additional setup
+    
+    def _change_pin(self, old_pin, new_pin):
+        """
+        Change PIN on the card.
+        
+        Args:
+            old_pin: Current PIN code
+            new_pin: New PIN code
+        
+        Raises:
+            PinError: If old PIN is incorrect
+            KeyStoreError: If PIN change fails
+        """
+        try:
+            self.applet.change_pin(old_pin, new_pin)
+            print(f'[{self.applet.NAME}] PIN changed successfully')
+        except Exception as e:
+            err_str = str(e).lower()
+            # Handle wrong old PIN
+            if '63c' in err_str or 'wrong' in err_str or 'invalid' in err_str:
+                raise PinError(f"Invalid old PIN!")
+            raise KeyStoreError(f"Failed to change PIN: {e}")
