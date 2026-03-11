@@ -30,12 +30,16 @@ class JavaCardKeyStore(RAMKeyStore):
     - Common connection state
     
     Subclasses must implement:
-    - get_applet() -> Applet instance
+    - is_available() -> Check if card is available
     - _on_pin_verified() -> Called after successful PIN verification
-    - Any applet-specific initialization
+    
+    Optional overrides:
+    - _init_secure_channel() -> Custom secure channel initialization
+    - _verify_pin(pin) -> Custom PIN verification
+    - _get_pin_attempts() -> Get remaining PIN attempts
     """
     
-    # Shared class-level
+    # Shared class-level connection
     connection = get_connection()
     
     def __init__(self):
@@ -72,6 +76,13 @@ class JavaCardKeyStore(RAMKeyStore):
         """
         return self.connected and self._pin_unlocked
     
+    def _init_secure_channel(self):
+        """Initialize secure channel - can be overridden by subclasses.
+        
+        Default implementation calls applet.init_secure_channel().
+        Subclasses using different interfaces (e.g., MemoryCard) should override.
+        """
+        self.applet.init_secure_channel()
     async def check_card(self, check_pin=False):
         """Check card presence and connect if needed.
         
@@ -101,13 +112,12 @@ class JavaCardKeyStore(RAMKeyStore):
                 raise KeyStoreError("Failed to select the applet")
             
             self.show_loader(title="Establishing secure channel...")
-            self.applet.init_secure_channel()
+            self._init_secure_channel()
             self.connected = True
         
         if check_pin and self.is_locked:
             pin = await self.get_pin()
             self._unlock(pin)
-    
     async def wait_for_card(self, scr):
         """Wait for card insertion."""
         while not self.connection.isCardInserted():
@@ -115,6 +125,34 @@ class JavaCardKeyStore(RAMKeyStore):
             scr.tick(5)
         if scr.waiting:
             scr.waiting = False
+    
+    def _verify_pin(self, pin):
+        """Verify PIN on the card - can be overridden by subclasses.
+        
+        Default implementation calls applet.verify_pin(pin).
+        Subclasses using different interfaces (e.g., MemoryCard) should override.
+        
+        Returns:
+            tuple: (success: bool, attempts_left: int or None)
+        """
+        return self.applet.verify_pin(pin)
+    
+    def _get_pin_attempts(self):
+        """Get remaining PIN attempts - can be overridden by subclasses.
+        
+        Default implementation calls applet.get_card_status().
+        Subclasses using different interfaces (e.g., MemoryCard) should override.
+        
+        Returns:
+            int or None: Number of attempts remaining, or None if unavailable
+        """
+        try:
+            resp_data, sw1, sw2 = self.applet.get_card_status()
+            if len(resp_data) >= 8:
+                return resp_data[4]
+        except Exception as e:
+            print(f'[{self.applet.NAME}] Failed to get card status:', e)
+        return None
     
     def _unlock(self, pin):
         """
@@ -124,7 +162,7 @@ class JavaCardKeyStore(RAMKeyStore):
         Raises CriticalErrorWipeImmediately if no attempts left.
         """
         try:
-            success, attempts = self.applet.verify_pin(pin)
+            success, attempts = self._verify_pin(pin)
             if success:
                 self._pin_unlocked = True
                 self._on_pin_verified()
@@ -140,7 +178,6 @@ class JavaCardKeyStore(RAMKeyStore):
             
             if should_raise:
                 raise exc
-    
     def _on_pin_verified(self):
         """
         Called after successful PIN verification.
@@ -166,14 +203,9 @@ class JavaCardKeyStore(RAMKeyStore):
         Shows PIN attempts remaining from calls verify_pin.
         """
         # Query card for PIN attempts
-        pin_attempts = None
-        try:
-            resp_data, sw1, sw2 = self.applet.get_card_status()
-            if len(resp_data) >= 8:
-                pin_attempts = resp_data[4]
-                print(f'[{self.applet.NAME}] PIN attempts remaining:', pin_attempts)
-        except Exception as e:
-            print(f'[{self.applet.NAME}] Failed to get card status:', e)
+        pin_attempts = self._get_pin_attempts()
+        if pin_attempts:
+            print(f'[{self.applet.NAME}] PIN attempts remaining:', pin_attempts)
         
         # PIN prompt loop
         while self.is_locked:
@@ -190,13 +222,7 @@ class JavaCardKeyStore(RAMKeyStore):
                 # Wrong PIN - show error alert
                 await self.show(Alert('PIN Error', str(e)))
                 # Re-query card for updated attempts
-                try:
-                    resp_data, sw1, sw2 = self.applet.get_card_status()
-                    if len(resp_data) >= 8:
-                        pin_attempts = resp_data[4]
-                except:
-                    pass
-    
+                pin_attempts = self._get_pin_attempts()
     async def init(self, show_fn, show_loader):
         """
         Initialize keystore - waits for card and and loads internal state.

@@ -1,5 +1,5 @@
 from .core import KeyStoreError, PinError
-from .ram import RAMKeyStore
+from .javacard_keystore import JavaCardKeyStore
 from .javacard.applets.memorycard import MemoryCardApplet, SecureError
 from .javacard.util import get_connection
 from platform import CriticalErrorWipeImmediately
@@ -7,14 +7,14 @@ import platform
 from embit import bip39
 from helpers import tagged_hash, aead_encrypt, aead_decrypt
 import hmac
-from gui.screens import Alert, Progress, Menu, Prompt
+from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
 import asyncio
 from io import BytesIO
 from binascii import hexlify
 import lvgl as lv
 
 
-class MemoryCard(RAMKeyStore):
+class MemoryCard(JavaCardKeyStore):
     """
     KeyStore that stores secrets on a smartcard
     using MemoryCard Java applet.
@@ -36,16 +36,13 @@ In this mode device can only operate when the smartcard is inserted!"""
     # Here we only have a single option - to show mnemonic
     storage_button = "Smartcard storage"
     load_button = "Load key from smartcard"
-    # javacard connection
-    connection = get_connection()
+    # javacard connection (inherited from JavaCardKeyStore)
 
     def __init__(self):
         super().__init__()
         # applet
         self.applet = MemoryCardApplet(self.connection)
         self._is_key_saved = False
-        self.connected = False
-
 
     @classmethod
     def is_available(cls):
@@ -63,6 +60,72 @@ In this mode device can only operate when the smartcard is inserted!"""
             cls.connection.disconnect()
             return False
 
+    # ========================================
+    # Override JavaCardKeyStore methods for MemoryCard-specific behavior
+    # ========================================
+
+    def _init_secure_channel(self):
+        """Override: MemoryCard uses open_secure_channel() instead of init_secure_channel()."""
+        self.applet.open_secure_channel()
+
+    def _verify_pin(self, pin):
+        """Override: MemoryCard uses applet.unlock() instead of verify_pin().
+        
+        Returns:
+            tuple: (success: bool, attempts_left: int or None)
+        """
+        try:
+            self.applet.unlock(pin)
+            return (True, None)
+        except SecureError as e:
+            err_str = str(e)
+            if err_str == "0502":  # wrong PIN
+                return (False, self.applet.pin_attempts_left)
+            elif err_str == "0503":  # bricked
+                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
+            else:
+                raise
+
+    def _get_pin_attempts(self):
+        """Override: MemoryCard uses applet properties for PIN attempts."""
+        try:
+            self.applet.get_pin_status()
+            return self.applet.pin_attempts_left
+        except Exception:
+            return None
+
+    @property
+    def is_pin_set(self):
+        return self.applet.is_pin_set
+
+    @property
+    def pin_attempts_left(self):
+        return self.applet.pin_attempts_left
+
+    @property
+    def pin_attempts_max(self):
+        return self.applet.pin_attempts_max
+
+    @property
+    def is_locked(self):
+        """Override: MemoryCard delegates is_locked to applet."""
+        return self.applet.is_locked
+
+    @property
+    def is_ready(self):
+        return (
+            self.connected
+            and (not self.is_locked)
+            and (self.fingerprint is not None)
+        )
+
+    def _on_pin_verified(self):
+        """Called after successful PIN verification."""
+        self.check_saved()
+
+    # ========================================
+    # Anti-phishing word support
+    # ========================================
 
     def get_auth_word(self, pin_part):
         """
@@ -86,54 +149,19 @@ In this mode device can only operate when the smartcard is inserted!"""
         word_number = int.from_bytes(h[:2], "big") % len(bip39.WORDLIST)
         return bip39.WORDLIST[word_number]
 
-    @property
-    def is_pin_set(self):
-        return self.applet.is_pin_set
+    async def get_pin(self, title="Enter your PIN code", subtitle=None, note=None, with_cancel=False):
+        """Override: MemoryCard uses anti-phishing words."""
+        scr = PinScreen(title=title, note=note, get_word=self.get_auth_word, subtitle=subtitle, with_cancel=with_cancel)
+        return await self.show(scr)
 
-    @property
-    def pin_attempts_left(self):
-        return self.applet.pin_attempts_left
-
-    @property
-    def pin_attempts_max(self):
-        return self.applet.pin_attempts_max
-
-    @property
-    def is_locked(self):
-        return self.applet.is_locked
-
-    @property
-    def is_ready(self):
-        return (
-            self.connected
-            and (not self.is_locked)
-            and (self.fingerprint is not None)
-        )
-
-    def _unlock(self, pin):
-        """
-        Unlock the keystore, raises PinError if PIN is invalid.
-        Raises CriticalErrorWipeImmediately if no attempts left.
-        """
-        try:
-            self.applet.unlock(pin)
-        except SecureError as e:
-            if str(e) == "0502":  # wrong PIN
-                raise PinError(
-                    "Invalid PIN!\n%d of %d attempts left..."
-                    % (self.pin_attempts_left, self.pin_attempts_max)
-                )
-            elif str(e) == "0503":  # bricked
-                # wipe is happening automatically on this exception
-                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
-            else:
-                raise e
-        self.check_saved()
+    # ========================================
+    # MemoryCard-specific storage methods
+    # ========================================
 
     @property
     def userkey(self):
         if self._userkey is None:
-            # userkey is uniquie for every smart card
+            # userkey is unique for every smart card
             self._userkey = tagged_hash("userkey", self.secret+(self.applet.card_pubkey or b""))
         return self._userkey
 
@@ -297,47 +325,6 @@ In this mode device can only operate when the smartcard is inserted!"""
         self.show_loader("Deleting secret from the card...")
         self.applet.save_secret(b"")
         self._is_key_saved = False
-
-    async def check_card(self, check_pin=False):
-        if not self.connection.isCardInserted():
-            # wait for card
-            scr = Progress(
-                "Smartcard is not inserted",
-                "Please insert the smartcard...",
-                button_text=None,
-            )  # no button
-            asyncio.create_task(self.wait_for_card(scr))
-            await self.show(scr)
-        try:
-            self.applet.ping()
-        except Exception as e:
-            print(e)
-            self.connected = False
-        # only required if not connected yet
-        if not self.connected:
-            self.show_loader(title="Connecting to the card...")
-            # connect and select applet
-            try:
-                self.connection.connect(self.connection.T1_protocol)
-            except:
-                raise KeyStoreError("Failed to communicate with the card.")
-            try:
-                self.applet.select()
-            except:
-                raise KeyStoreError("Failed to select the applet")
-            self.applet.open_secure_channel()
-            self.connected = True
-        self.applet.get_pin_status()
-        if check_pin and self.is_locked:
-            pin = await self.get_pin()
-            self._unlock(pin)
-
-    async def wait_for_card(self, scr):
-        while not self.connection.isCardInserted():
-            await asyncio.sleep_ms(30)
-            scr.tick(5)
-        if scr.waiting:
-            scr.waiting = False
 
     async def init(self, show_fn, show_loader):
         """
