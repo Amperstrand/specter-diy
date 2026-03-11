@@ -190,16 +190,15 @@ class Satochip(JavaCardKeyStore):
 
         print('[BootTrace][Satochip] Authentikey format:', key_format)
 
-        # hash160 = RIPEMD160(SHA256(data))
+        # Use shared utility function for fingerprint derivation
+        from .javacard.util import derive_fingerprint
+        
         try:
-            import hashlib
-            sha256_hash = hashlib.sha256(compressed).digest()
-            ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
+            self.fingerprint = derive_fingerprint(authentikey_bytes)
         except Exception as e:
             print('[BootTrace][Satochip] Fingerprint derivation failed:', e)
             raise KeyStoreError("Failed to derive card fingerprint")
-
-        self.fingerprint = ripemd160[:4]
+        
         print('[BootTrace][Satochip] Fingerprint set:', hexlify(self.fingerprint).decode())
 
         # Derive idkey from authentikey for wallet file encryption
@@ -268,22 +267,9 @@ class Satochip(JavaCardKeyStore):
             # Get authentikey and calculate fingerprint
             authentikey_bytes = self.applet.get_authentikey()
             if authentikey_bytes and len(authentikey_bytes) > 0:
-                # Compress pubkey: first byte (02/03) + x-coord (32 bytes)
-                if len(authentikey_bytes) == 65:  # Uncompressed
-                    # y = authentikey_bytes[33:65]
-                    x = authentikey_bytes[1:33]
-                    # Determine prefix based on y parity
-                    y_last = authentikey_bytes[64]
-                    prefix = b'\x03' if y_last % 2 else b'\x02'
-                    compressed = prefix + x
-                else:
-                    compressed = authentikey_bytes
-                
-                # hash160 = RIPEMD160(SHA256(data))
-                import hashlib
-                sha256_hash = hashlib.sha256(compressed).digest()
-                ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
-                fingerprint = ripemd160[:4]
+                # Use shared utility for fingerprint derivation
+                from .javacard.util import derive_fingerprint
+                fingerprint = derive_fingerprint(authentikey_bytes)
                 
                 props = [
                     "\n#7f8fa4 CARD INFO: #",
