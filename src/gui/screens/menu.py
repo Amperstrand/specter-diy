@@ -9,6 +9,12 @@ class Menu(Screen):
         self, buttons=[], title="What do you want to do?", note=None, y0=60, last=None
     ):
         super().__init__()
+        print("[UITrace] Menu init: title=%r items=%d" % (title, len(buttons)))
+        for value, text, *args in buttons:
+            if text is None:
+                continue
+            enabled = (value is None) or (len(args) == 0 or args[0])
+            print("[UITrace] Menu item: value=%r text=%r enabled=%s" % (value, text, enabled))
         y = y0
         self.title = add_label(title, style="title", scr=self)
         if note is not None:

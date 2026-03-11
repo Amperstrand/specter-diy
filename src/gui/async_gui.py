@@ -46,6 +46,13 @@ class AsyncGUI:
     async def load_screen(self, scr):
         while self.background is not None:
             await asyncio.sleep_ms(10)
+        title = None
+        if hasattr(scr, "title") and scr.title is not None and hasattr(scr.title, "get_text"):
+            try:
+                title = scr.title.get_text()
+            except Exception:
+                title = None
+        print("[UITrace] load_screen: %s title=%r" % (type(scr).__name__, title))
         old_scr = lv.scr_act()
         lv.scr_load(scr)
         self.scr = scr
@@ -55,12 +62,20 @@ class AsyncGUI:
         # wait for another popup to finish
         while self.background is not None:
             await asyncio.sleep_ms(10)
+        title = None
+        if hasattr(scr, "title") and scr.title is not None and hasattr(scr.title, "get_text"):
+            try:
+                title = scr.title.get_text()
+            except Exception:
+                title = None
+        print("[UITrace] open_popup: %s title=%r" % (type(scr).__name__, title))
         self.background = self.scr
         self.scr = scr
         lv.scr_load(scr)
 
     async def close_popup(self):
         scr = self.background
+        print("[UITrace] close_popup")
         self.background = None
         await self.load_screen(scr)
 

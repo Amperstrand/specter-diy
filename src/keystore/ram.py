@@ -92,7 +92,9 @@ class RAMKeyStore(KeyStore):
         if key is None:
             key = self.idkey
         if key is None:
-            raise KeyStoreError("Pass the key please")
+            raise KeyStoreError(
+                "Pass the key please (no encryption key available for save_aead at %s)" % path
+            )
         d = aead_encrypt(key, adata, plaintext)
         with open(path, "wb") as f:
             f.write(d)
@@ -106,7 +108,9 @@ class RAMKeyStore(KeyStore):
         if key is None:
             key = self.idkey
         if key is None:
-            raise KeyStoreError("Pass the key please")
+            raise KeyStoreError(
+                "Pass the key please (no encryption key available for load_aead at %s)" % path
+            )
         with open(path, "rb") as f:
             data = f.read()
         return aead_decrypt(data, key)
@@ -212,6 +216,10 @@ class RAMKeyStore(KeyStore):
         if the keystore cannot export the mnemonic/seed.
         Hardware wallets like Satochip should return False.
         """
+        return True
+
+    @property
+    def supports_taproot(self):
         return True
     @property
     def pin_attempts_left(self):

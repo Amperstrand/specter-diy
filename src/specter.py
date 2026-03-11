@@ -138,15 +138,23 @@ class Specter:
             self.wipe()
         # catch an expected error
         except BaseError as e:
+            print("[ExceptionTrace][BaseError] %s: %s" % (type(e).__name__, e))
+            try:
+                b = BytesIO()
+                sys.print_exception(e, b)
+                print(b.getvalue().decode())
+            except Exception:
+                pass
             # show error
             await self.gui.alert(e.NAME, "%s" % e)
             # restart
             return next_fn
         # show trace for unexpected errors
         except Exception as e:
-            print(e)
+            print("[ExceptionTrace][Unexpected] %s: %s" % (type(e).__name__, e))
             b = BytesIO()
             sys.print_exception(e, b)
+            print(b.getvalue().decode())
             errmsg = "Something unexpected happened...\n\n"
             errmsg += b.getvalue().decode()
             await self.gui.error(errmsg)
@@ -232,6 +240,8 @@ class Specter:
                 await next_fn()
 
     def init_apps(self):
+        if hasattr(self.keystore, "set_network"):
+            self.keystore.set_network(self.network)
         for app in self.apps:
             app.init(self.keystore, self.network, self.gui.show_loader, self.cross_app_communicate)
 
