@@ -501,7 +501,7 @@ class Satochip(JavaCardKeyStore):
         return sig_count
     
     def _get_sighash(self, psbt, i, inp, sighash_type):
-        """Compute the sighash for a PSBT input.
+        """Compute the sighash for a PSBT input using embit's built-in methods.
         
         Args:
             psbt: PSBT object
@@ -517,40 +517,33 @@ class Satochip(JavaCardKeyStore):
         if inp_sighash == SIGHASH.DEFAULT:
             inp_sighash = SIGHASH.ALL
         
-        # Check if segwit
-        if inp.witness_utxo:
-            # Segwit signing (BIP 143)
-            from embit.script import Script
+        # Use embit's Transaction.sighash_segwit() or Transaction.sighash_legacy()
+        try:
+            if inp.witness_utxo:
+                # Segwit (BIP 143)
+                # Get scriptcode
+                from embit.script import Script
+                if inp.witness_utxo.script_pubkey.is_p2wpkh():
+                    scriptcode = Script(b"\x76\xa9\x14" + inp.witness_utxo.script_pubkey.data + b"\x88\xac")
+                elif inp.witness_script:
+                    scriptcode = inp.witness_script
+                else:
+                    scriptcode = inp.witness_utxo.script_pubkey
+                
+                return psbt.tx.sighash_segwit(i, scriptcode, inp.witness_utxo.value, inp_sighash)
             
-            # Get the scriptcode
-            if inp.witness_utxo.script_pubkey.is_p2wpkh():
-                # For P2WPKH, scriptcode is P2PKH script
-                scriptcode = Script(b"\x76\xa9\x14" + inp.witness_utxo.script_pubkey.data + b"\x88\xac")
-            elif inp.witness_script:
-                scriptcode = inp.witness_script
+            elif inp.non_witness_utxo:
+                # Legacy
+                prev_index = psbt.tx.vin[i].vout
+                script_pubkey = inp.non_witness_utxo.vout[prev_index].script_pubkey
+                return psbt.tx.sighash_legacy(i, script_pubkey, inp_sighash)
+            
             else:
-                scriptcode = inp.witness_utxo.script_pubkey
-            
-            # Compute segwit sighash manually (BIP 143)
-            msghash = self._compute_segwit_sighash(
-                psbt.tx, i, scriptcode, inp.witness_utxo.value, inp_sighash
-            )
-            return msghash
-        
-        elif inp.non_witness_utxo:
-            # Legacy signing
-            prev_tx = inp.non_witness_utxo
-            prev_index = psbt.tx.vin[i].vout
-            prev_output = prev_tx.vout[prev_index]
-            
-            # Compute legacy sighash
-            msghash = self._compute_legacy_sighash(
-                psbt.tx, i, prev_output.script_pubkey, inp_sighash
-            )
-            return msghash
-        
-        else:
-            print('[Satochip] No UTXO info for input', i)
+                print('[Satochip] No UTXO info for input', i)
+                return None
+                
+        except Exception as e:
+            print('[Satochip] Sighash computation failed:', e)
             return None
     
     def sign_input(self, psbtv, i, sig_stream, sighash=SIGHASH.ALL, extra_scope_data=None):
@@ -626,158 +619,3 @@ class Satochip(JavaCardKeyStore):
             print('[Satochip] sighash computation failed:', e)
             return None
 
-    def _compute_segwit_sighash(self, tx, input_index, scriptcode, value, sighash_type):
-        """Compute segwit sighash (BIP 143).
-        
-        Args:
-            tx: Transaction object
-            input_index: Index of input being signed
-            scriptcode: The script code (P2PKH for P2WPKH, witness script for P2WSH)
-            value: Value of the UTXO being spent (in satoshis)
-            sighash_type: Sighash type (SIGHASH.ALL, etc.)
-        
-        Returns:
-            bytes: 32-byte sighash
-        """
-        import hashlib
-        from embit import hashes
-        
-        # BIP 143 sighash computation
-        # https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki
-        
-        # Extract sighash flags
-        sh = sighash_type & 0x1f  # Base sighash (ALL, NONE, SINGLE)
-        anyonecanpay = sighash_type & 0x80
-        
-        # Start building the preimage
-        h = hashlib.sha256()
-        
-        # 1. Version (4 bytes, little-endian)
-        h.update(tx.version.to_bytes(4, 'little'))
-        
-        # 2. HashPrevouts (32 bytes)
-        if anyonecanpay:
-            h.update(b"\x00" * 32)
-        else:
-            prevouts = b''.join(
-                inp.txid + inp.vout.to_bytes(4, 'little') 
-                for inp in tx.vin
-            )
-            h.update(hashlib.sha256(hashlib.sha256(prevouts).digest()).digest())
-        
-        # 3. HashSequence (32 bytes)
-        if anyonecanpay or sh in (0x02, 0x03):  # NONE or SINGLE
-            h.update(b"\x00" * 32)
-        else:
-            sequences = b''.join(
-                inp.sequence.to_bytes(4, 'little') 
-                for inp in tx.vin
-            )
-            h.update(hashlib.sha256(hashlib.sha256(sequences).digest()).digest())
-        
-        # 4. Outpoint (36 bytes: txid + vout)
-        tx_in = tx.vin[input_index]
-        h.update(tx_in.txid)
-        h.update(tx_in.vout.to_bytes(4, 'little'))
-        
-        # 5. ScriptCode (var bytes)
-        h.update(scriptcode.serialize())
-        
-        # 6. Value (8 bytes, little-endian)
-        h.update(value.to_bytes(8, 'little'))
-        
-        # 7. Sequence (4 bytes, little-endian)
-        h.update(tx_in.sequence.to_bytes(4, 'little'))
-        
-        # 8. HashOutputs (32 bytes)
-        if sh == 0x02:  # NONE
-            h.update(b"\x00" * 32)
-        elif sh == 0x03:  # SINGLE
-            if input_index < len(tx.vout):
-                outputs = tx.vout[input_index].serialize()
-                h.update(hashlib.sha256(hashlib.sha256(outputs).digest()).digest())
-            else:
-                h.update(b"\x00" * 32)
-        else:  # ALL (0x01)
-            outputs = b''.join(out.serialize() for out in tx.vout)
-            h.update(hashlib.sha256(hashlib.sha256(outputs).digest()).digest())
-        
-        # 9. Locktime (4 bytes, little-endian)
-        h.update(tx.locktime.to_bytes(4, 'little'))
-        
-        # 10. Sighash type (4 bytes, little-endian)
-        h.update(sighash_type.to_bytes(4, 'little'))
-        
-        # Final double-SHA256
-        return hashlib.sha256(hashlib.sha256(h.digest()).digest()).digest()
-    
-    def _compute_legacy_sighash(self, tx, input_index, script_pubkey, sighash_type):
-        """Compute legacy sighash.
-        
-        Args:
-            tx: Transaction object
-            input_index: Index of input being signed
-            script_pubkey: The scriptPubKey of the UTXO
-            sighash_type: Sighash type
-        
-        Returns:
-            bytes: 32-byte sighash
-        """
-        import hashlib
-        
-        # Extract sighash flags
-        sh = sighash_type & 0x1f
-        anyonecanpay = sighash_type & 0x80
-        
-        # Build the preimage
-        h = hashlib.sha256()
-        
-        # Version
-        h.update(tx.version.to_bytes(4, 'little'))
-        
-        # Inputs count
-        if anyonecanpay:
-            h.update((1).to_bytes(1, 'little'))
-        else:
-            h.update(len(tx.vin).to_bytes(1, 'little'))
-        
-        # Inputs
-        if anyonecanpay:
-            # Only the input being signed
-            inp = tx.vin[input_index]
-            h.update(inp.txid)
-            h.update(inp.vout.to_bytes(4, 'little'))
-            h.update(script_pubkey.serialize())
-            h.update(inp.sequence.to_bytes(4, 'little'))
-        else:
-            for i, inp in enumerate(tx.vin):
-                h.update(inp.txid)
-                h.update(inp.vout.to_bytes(4, 'little'))
-                if i == input_index:
-                    h.update(script_pubkey.serialize())
-                else:
-                    h.update(b'')  # Empty script
-                h.update(inp.sequence.to_bytes(4, 'little'))
-        
-        # Outputs count
-        if sh == 0x02:  # NONE
-            h.update((0).to_bytes(1, 'little'))
-        else:
-            h.update(len(tx.vout).to_bytes(1, 'little'))
-        
-        # Outputs
-        if sh == 0x01:  # ALL
-            for out in tx.vout:
-                h.update(out.serialize())
-        elif sh == 0x03:  # SINGLE
-            if input_index < len(tx.vout):
-                h.update(tx.vout[input_index].serialize())
-        # NONE (0x02) - no outputs
-        
-        # Locktime
-        h.update(tx.locktime.to_bytes(4, 'little'))
-        
-        # Sighash type
-        h.update(sighash_type.to_bytes(4, 'little'))
-        
-        return hashlib.sha256(hashlib.sha256(h.digest()).digest()).digest()
