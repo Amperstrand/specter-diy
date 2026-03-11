@@ -173,6 +173,15 @@ class Specter:
 
     async def setup(self):
         try:
+            # Start test mode if available
+            if hasattr(self, 'test_mode') and self.test_mode is not None:
+                try:
+                    import asyncio
+                    asyncio.create_task(self.test_mode._command_loop())
+                    print("[Specter] Test mode started")
+                except Exception as e:
+                    print("[Specter] Failed to start test mode:", e)
+            
             # check if the user already selected the keystore class
             if self.keystore is None:
                 await self.select_keystore()
@@ -253,15 +262,19 @@ class Specter:
         # for every button we use an ID
         # to avoid mistakes when editing strings
         # If ID is None - it is a section title, not a button
-        buttons = [
-            # id, text
-            (None, "Key management"),
-            (0, "Generate new key"),
-            (1, "Enter recovery phrase"),
-            (777, "Import recovery phrase"),
-        ]
-        if self.keystore.is_key_saved and self.keystore.load_button:
-            buttons.append((2, self.keystore.load_button))
+        buttons = []
+
+        # Only show key management buttons if keystore can export seed
+        if self.keystore.can_export_seed:
+            buttons += [
+                (None, "Key management"),
+                (0, "Generate new key"),
+                (1, "Enter recovery phrase"),
+                (777, "Import recovery phrase"),
+            ]
+            if self.keystore.is_key_saved and self.keystore.load_button:
+                buttons.append((2, self.keystore.load_button))
+
         buttons += [(None, "Settings"), (3, "Device settings")]
         # wait for menu selection
         menuitem = await self.gui.menu(buttons)
@@ -404,42 +417,15 @@ class Specter:
         ]
         if self.keystore.storage_button is not None:
             buttons.append((1, self.keystore.storage_button))
-        buttons.append((2, "Enter passphrase"))
-        if hasattr(self.keystore, "show_mnemonic"):
-            buttons.append((3, "Show recovery phrase"))
+        # Only show passphrase and recovery phrase if keystore can export seed
+        if self.keystore.can_export_seed:
+            buttons.append((2, "Enter passphrase"))
+            if hasattr(self.keystore, "show_mnemonic"):
+                buttons.append((3, "Show recovery phrase"))
         buttons.extend([(None, "Security"), (4, "Device settings")])  # delimiter
         buttons.extend([(None, "About"), (6, "About this device")])
         # wait for menu selection
         menuitem = await self.gui.menu(buttons, last=(255, None), note=self._firmware_note())
-
-        # process the menu button:
-        # back button
-        if menuitem == 255:
-            return self.mainmenu
-        elif menuitem == 1:
-            res = await self.keystore.storage_menu()
-            # storage_menu returns True if app reinit is required
-            if res:
-                self.init_apps()
-        elif menuitem == 2:
-            pwd = await self.gui.get_input()
-            if pwd is None:
-                return self.settingsmenu
-            self.keystore.set_mnemonic(password=pwd)
-            self.init_apps()
-        elif menuitem == 3:
-            await self.keystore.show_mnemonic()
-        elif menuitem == 4:
-            await self.update_devsettings()
-        elif menuitem == 5:
-            await self.select_network()
-        elif menuitem == 6:
-            await self.show_about()
-        else:
-            print(menuitem)
-            raise SpecterError("Not implemented")
-        return self.settingsmenu
-
     async def select_network(self):
         buttons = [
             (None, "Production"),
@@ -565,7 +551,6 @@ class Specter:
         self.GLOBAL = settings
         BaseApp.GLOBAL = settings
         self.save_settings(settings)
-
     async def update_devsettings(self):
         buttons = [
             (None, "Categories")

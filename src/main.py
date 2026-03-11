@@ -80,6 +80,15 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
+    # Start test mode for automated testing
+    try:
+        from test_mode import TestMode
+        test_mode = TestMode(specter)  # Pass specter instance
+        # We'll start test mode after specter starts the event loop
+        specter.test_mode = test_mode
+    except Exception as e:
+        print("[Main] Test mode not available:", e)
+        specter.test_mode = None
     specter.start()
 
 
