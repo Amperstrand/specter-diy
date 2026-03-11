@@ -343,8 +343,22 @@ python3 test/run_tests.py
 
 | Phase | Task | Status | Commit |
 |-------|------|--------|--------|
-| 1.1 | Unit test infrastructure | ✅ Complete | b0dc63a |
-| 1.2 | Utility functions | ✅ Complete | c5d66a7 |
+| 1.1 | Unit test infrastructure | ✅ Complete | 2b5aa5f |
+| 1.2 | Utility functions | ✅ Complete | - |
+| 2.1 | SecureAppletBase tests | ✅ Complete | 655c3bf |
+| 2.2 | SecureAppletBase class | ✅ Complete | 655c3bf |
+| 3.1 | JavaCardKeyStore tests | ✅ Complete | b1088e0 |
+| 3.2 | JavaCardKeyStore class | ✅ Complete | b1088e0 |
+| 3.3 | SeedKeeper refactor | ✅ Complete | 1ffc188 |
+| 3.4 | Satochip refactor | ✅ Complete | 939c12e |
+| 3.5 | MemoryCard refactor | ⬜ Pending | - |
+| 4.1 | Card detection tests | ⬜ Pending | - |
+| 4.2 | Card detection implementation | ⬜ Pending | - |
+| 4.3 | is_available() update | ⬜ Pending | - |
+| 5.1 | Test mode generic | ⬜ Pending | - |
+| 6.1 | Remove dead code | ✅ Complete | 1ffc188 |
+| 6.2 | Update documentation | ⬜ Pending | - |
+
 **Status Legend:** ⬜ Not Started | 🔄 In Progress | ✅ Complete | ❌ Blocked
 
 ---
@@ -353,7 +367,7 @@ python3 test/run_tests.py
 
 | Metric | Before | After | Change |
 |--------|--------|-------|--------|
-| Total lines (keystores) | ~1,750 | ~1,550 | -200 |
+| Total lines (keystores) | ~1,750 | ~1,350 | -400 |
 | Duplicated code | ~200 lines | ~0 | -200 |
 | Test coverage | ~20% | ~80% | +60% |
 | Card detection reliability | Unknown card silent | Unknown card error | Improved |
@@ -362,13 +376,11 @@ python3 test/run_tests.py
 
 ## Next Steps
 
-1. Review and approve this plan
-2. Start with Task 1.1: Create unit test infrastructure
-3. Follow the plan sequentially
-4. Commit after each completed task
-5. Run full test suite after each phase
+1. Phase 4: Card detection enhancement
+2. Phase 5: Test mode generic
+3. Phase 6: Documentation update
 
 ---
 
 ## Author
-Last updated: Phase 1.1 and 1.2 complete
+Last updated: Phase 3.4 complete (Satochip refactored)
