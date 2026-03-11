@@ -100,12 +100,15 @@ class SatochipApplet(SecureAppletBase):
         Response format from card:
             chaincode(32) | coordx_size(2) | coordx(32) | sign_size(2) | self-sign | auth_sign_size(2) | auth-sign
         """
+        # Use shared utility function
+        from ..util import path_to_bytes
+        
         if isinstance(path, str):
-            path = self._path_to_bytes(path)
+            path = path_to_bytes(path)
         
         # P1 = path depth (number of derivation levels)
         depth = len(path) // 4
-        # P2 = option flags: 0x40 = optimization for non-hardened child derivation
+        # P2 = option flag: 0x40 = optimization for non-hardened child derivation
         p2 = 0x40
         
         apdu = bytes([self.CLA, self.INS_BIP32_GET_EXTENDED_KEY, depth, p2, len(path)]) + path
@@ -137,38 +140,9 @@ class SatochipApplet(SecureAppletBase):
         return (pubkey, chaincode)
     
     def _path_to_bytes(self, path_str):
-        """Convert derivation path string to bytes.
-        
-        Args:
-            path_str: Path like "m/44h/0h/0h" or "m/44'/0'/0'"
-        
-        Returns:
-            bytes: 4 bytes per level, big-endian, hardened bit = 0x80000000
-        """
-        path_bytes = b''
-        
-        # Remove 'm/' prefix if present
-        if path_str.startswith('m/'):
-            path_str = path_str[2:]
-        elif path_str == 'm':
-            return b''
-        
-        for part in path_str.split('/'):
-            if not part:
-                continue
-            # Check for hardened derivation
-            hardened = part.endswith('h') or part.endswith("'")
-            if hardened:
-                part = part[:-1]
-            
-            index = int(part)
-            if hardened:
-                index |= 0x80000000
-            
-            # Big-endian 4 bytes
-            path_bytes += index.to_bytes(4, 'big')
-        
-        return path_bytes
+        """Convert derivation path string to bytes - DEPRECATED, uses util.path_to_bytes."""
+        from ..util import path_to_bytes
+        return path_to_bytes(path_str)
     
     def sign_transaction_hash(self, keynbr, tx_hash):
         """Sign a transaction hash directly (INS 0x7A).
@@ -214,10 +188,10 @@ class SatochipApplet(SecureAppletBase):
             HDKey: Extended public key object
         """
         from embit import bip32
-        import hashlib
         
-        # Convert path to bytes
-        path_bytes = self._path_to_bytes(path_str)
+        # Convert path to bytes using utility function
+        from ..util import path_to_bytes, derive_fingerprint
+        path_bytes = path_to_bytes(path_str)
         depth = len(path_bytes) // 4
         
         # Get extended key from card
@@ -231,9 +205,8 @@ class SatochipApplet(SecureAppletBase):
             # Get parent key for fingerprint
             parent_path = path_bytes[:-4]  # Remove last 4 bytes
             parent_pubkey, _ = self.get_extended_key(parent_path)
-            # Fingerprint = hash160(pubkey)[:4]
-            sha256_hash = hashlib.sha256(parent_pubkey).digest()
-            parent_fingerprint = hashlib.new('ripemd160', sha256_hash).digest()[:4]
+            # Use shared utility for fingerprint derivation
+            parent_fingerprint = derive_fingerprint(parent_pubkey)
             # Child number = last 4 bytes of path
             child_number = path_bytes[-4:]
         
