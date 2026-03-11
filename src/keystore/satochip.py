@@ -1,17 +1,14 @@
 from .core import KeyStoreError, PinError
-from .ram import RAMKeyStore
+from .javacard_keystore import JavaCardKeyStore
 from .javacard.applets.satochip_applet import SatochipApplet
-from .javacard.applets.applet import ISOException, AppletException
-from .javacard.util import get_connection
-from platform import CriticalErrorWipeImmediately
 import asyncio
-from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
+from gui.screens import Alert, Menu, Progress
 from embit.transaction import SIGHASH
 from embit import bip32
 from embit.networks import NETWORKS
 from binascii import hexlify
 
-class Satochip(RAMKeyStore):
+class Satochip(JavaCardKeyStore):
     """
     KeyStore that loads secrets from a Satochip smartcard.
     Satochip is a hardware wallet that keeps the mnemonic secure on the card.
@@ -24,18 +21,14 @@ class Satochip(RAMKeyStore):
     # Button to go to storage menu
     storage_button = "Satochip storage"
     load_button = "Open Satochip card"
-    # javacard connection
-    connection = get_connection()
-
     def __init__(self):
         super().__init__()
-        # applet
+        # applet instance
         self.applet = SatochipApplet(self.connection)
-        self._pin_unlocked = False
-        self.connected = False
+        # Satochip-specific state
         self.wallet_label = "Satochip"
         self.network = "main"
-
+        self.idkey = None
     @classmethod
     def is_available(cls):
         """Check if Satochip card is available and responsive."""
@@ -56,16 +49,6 @@ class Satochip(RAMKeyStore):
             print('[BootTrace][Satochip] Probe failed:', e)
             cls.connection.disconnect()
             return False
-    @property
-    def is_pin_set(self):
-        """Satochip always has PIN set."""
-        return True
-
-    @property
-    def is_locked(self):
-        """Returns True if PIN has not been verified yet."""
-        return not self._pin_unlocked
-
     @property
     def is_ready(self):
         """Returns True if connected, unlocked, and identity keys are set."""
@@ -130,72 +113,6 @@ class Satochip(RAMKeyStore):
         """Unique identifier for the card."""
         # TODO: implement proper hexid from authentikey
         return "satochip"
-
-
-    async def check_card(self, check_pin=False):
-        """Check card presence and connect if needed."""
-        if not self.connection.isCardInserted():
-            scr = Progress(
-                "Satochip card not inserted",
-                "Please insert the Satochip card...",
-                button_text="",
-            )
-            asyncio.create_task(self.wait_for_card(scr))
-            await self.show(scr)
-
-        if not self.connected:
-            self.show_loader(title="Connecting to the card...")
-            try:
-                self.connection.connect(self.connection.T1_protocol)
-            except:
-                raise KeyStoreError("Failed to communicate with the card.")
-            try:
-                self.applet.select()
-            except:
-                raise KeyStoreError("Failed to select the applet")
-
-            self.show_loader(title="Establishing secure channel...")
-            self.applet.init_secure_channel()
-            self.connected = True
-
-    async def wait_for_card(self, scr):
-        """Wait for card insertion."""
-        while not self.connection.isCardInserted():
-            await asyncio.sleep_ms(30)
-            scr.tick(5)
-        if scr.waiting:
-            scr.waiting = False
-
-    def _unlock(self, pin):
-        """
-        Unlock the keystore by verifying PIN on the card.
-        Raises PinError if PIN is invalid.
-        Raises CriticalErrorWipeImmediately if no attempts left.
-        """
-        try:
-            success, attempts = self.applet.verify_pin(pin)
-            if success:
-                self._pin_unlocked = True
-                return
-            if attempts is not None:
-                raise PinError("Invalid PIN!\n%d attempts left..." % attempts)
-        except ISOException as e:
-            sw = str(e).lower()
-            if sw == "9c0c" or sw == "6983":
-                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
-            if sw.startswith("63c") and len(sw) == 4:
-                try:
-                    attempts_left = int(sw[3], 16)
-                except ValueError:
-                    attempts_left = None
-                if attempts_left is not None:
-                    raise PinError("Invalid PIN!\n%d attempts left..." % attempts_left)
-                raise PinError("Invalid PIN!")
-            raise
-        except AppletException as e:
-            if "6983" in str(e) or "9c0c" in str(e):
-                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
-            raise
 
     async def unlock(self):
         """
@@ -304,14 +221,6 @@ class Satochip(RAMKeyStore):
             self.fingerprint is not None,
             self.idkey is not None,
         ))
-
-    async def get_pin(self, title="Enter your PIN code", subtitle=None, note=None, with_cancel=False):
-        """
-        Show PIN screen for entry.
-        Uses get_word=None to disable anti-phishing words (Satochip-specific).
-        """
-        scr = PinScreen(title=title, note=note, get_word=None, subtitle=subtitle, with_cancel=with_cancel)
-        return await self.show(scr)
 
     async def init(self, show_fn, show_loader):
         """Initialize Satochip - generates in-memory secret for settings.
