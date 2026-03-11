@@ -120,7 +120,6 @@ class SecureAppletBase(Applet):
             True if secure channel can be used for commands
         """
         return self.sc.is_initialized
-    
     def close_secure_channel(self):
         """
         Close the secure channel.
@@ -131,3 +130,38 @@ class SecureAppletBase(Applet):
         self.sc.aes_key = None
         self.sc.mac_key = None
         self.sc.iv_counter = 1
+    
+    def change_pin(self, old_pin, new_pin):
+        """
+        Change the card PIN code.
+        
+        APDU: INS 0x44 with old_pin and new_pin
+        Requires secure channel and unlocked card.
+        
+        Args:
+            old_pin: Current PIN code (string or bytes)
+            new_pin: New PIN code (string or bytes)
+        
+        Raises:
+            AppletException: If card is locked or PIN change fails
+            ISOException: If card returns error status word
+        """
+        if isinstance(old_pin, str):
+            old_pin = old_pin.encode()
+        if isinstance(new_pin, str):
+            new_pin = new_pin.encode()
+        
+        # Validate PIN lengths (typically 4-16 bytes)
+        if len(old_pin) < 4 or len(old_pin) > 16:
+            raise AppletException("Old PIN must be 4-16 characters")
+        if len(new_pin) < 4 or len(new_pin) > 16:
+            raise AppletException("New PIN must be 4-16 characters")
+        
+        # Build APDU: CLA INS P1 P2 Lc [old_pin_len(1) | old_pin | new_pin_len(1) | new_pin]
+        # Using CLA=0xB0, INS=0x44 (CHANGE_PIN)
+        apdu_data = bytes([len(old_pin)]) + old_pin + bytes([len(new_pin)]) + new_pin
+        inner_apdu = bytes([0xB0, 0x44, 0x00, 0x00, len(apdu_data)]) + apdu_data
+        
+        print(f"[{self.NAME}] TX (encrypted): CHANGE_PIN")
+        self.secure_request(inner_apdu)
+        print(f"[{self.NAME}] PIN changed successfully")
