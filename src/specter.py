@@ -166,17 +166,64 @@ class Specter:
         if len(self.keystores) == 1:
             self.keystore = self.keystores[0]()
             return
-        # checking the first available keystore
+        
+        # Use CardDetector for positive card type identification
+        from keystore.javacard.card_detector import CardDetector
+        from keystore.memorycard import MemoryCard
+        from keystore.seedkeeper import SeedKeeper
+        from keystore.satochip import Satochip
+        
+        # Map card types to keystore classes
+        card_type_to_keystore = {
+            'memorycard': MemoryCard,
+            'seedkeeper': SeedKeeper,
+            'satochip': Satochip,
+        }
+        
         keystore_cls = None
-        # TODO: show some screen here if none are available
+        last_card_type = None
+        
         while keystore_cls is None:
-            for keystore in self.keystores:
-                if keystore.is_available():
-                    keystore_cls = keystore
-                    break
-            # if none are available just wait for it
-            # if keystore_cls is None:
-            #     await asyncio.sleep_ms(50)
+            # Detect card type using CardDetector
+            # Get shared connection from keystore module
+            from keystore.javacard.util import get_connection
+            connection = get_connection()
+            detector = CardDetector(connection)
+            card_type = detector.detect_card_type()
+            
+            if card_type is None:
+                # No card inserted - wait and retry
+                await asyncio.sleep_ms(200)
+                continue
+            
+            if card_type == 'unknown':
+                # Card inserted but not recognized - show error
+                if last_card_type != 'unknown':  # Only show error once
+                    print('[Specter] Unknown card detected - refusing to start')
+                    from gui.screens import Alert
+                    await self.gui.show_screen()(
+                        Alert(
+                            'Unknown Card',
+                            'An unrecognized smartcard is inserted.\n\n'
+                            'Only SeedKeeper, Satochip, or MemoryCard\n'
+                            'applets are supported.\n\n'
+                            'Please remove the card and insert\n'
+                            'a supported one.'
+                        )
+                    )
+                    last_card_type = 'unknown'
+                await asyncio.sleep_ms(1000)
+                continue
+            
+            # Known card type detected
+            last_card_type = card_type
+            keystore_cls = card_type_to_keystore.get(card_type)
+            
+            if keystore_cls is None:
+                # Fallback: should not happen, but handle gracefully
+                print(f'[Specter] Unknown card type in mapping: {card_type}')
+                await asyncio.sleep_ms(200)
+        
         self.keystore = keystore_cls()
 
     async def setup(self):
