@@ -248,15 +248,17 @@ class Specter:
         # for every button we use an ID
         # to avoid mistakes when editing strings
         # If ID is None - it is a section title, not a button
-        buttons = [
-            # id, text
-            (None, "Key management"),
-            (0, "Generate new key"),
-            (1, "Enter recovery phrase"),
-            (777, "Import recovery phrase"),
-        ]
-        if self.keystore.is_key_saved and self.keystore.load_button:
-            buttons.append((2, self.keystore.load_button))
+        buttons = []
+        # Only show key management buttons if keystore can export seed
+        if self.keystore.can_export_seed:
+            buttons += [
+                (None, "Key management"),
+                (0, "Generate new key"),
+                (1, "Enter recovery phrase"),
+                (777, "Import recovery phrase"),
+            ]
+            if self.keystore.is_key_saved and self.keystore.load_button:
+                buttons.append((2, self.keystore.load_button))
         buttons += [(None, "Settings"), (3, "Device settings")]
         # wait for menu selection
         menuitem = await self.gui.menu(buttons)
@@ -399,9 +401,10 @@ class Specter:
         ]
         if self.keystore.storage_button is not None:
             buttons.append((1, self.keystore.storage_button))
-        buttons.append((2, "Enter passphrase"))
-        if hasattr(self.keystore, "show_mnemonic"):
-            buttons.append((3, "Show recovery phrase"))
+        if self.keystore.can_export_seed:
+            buttons.append((2, "Enter passphrase"))
+            if hasattr(self.keystore, "show_mnemonic"):
+                buttons.append((3, "Show recovery phrase"))
         buttons.extend([(None, "Security"), (4, "Device settings")])  # delimiter
         buttons.extend([(None, "About"), (6, "About this device")])
         # wait for menu selection
@@ -640,6 +643,11 @@ class Specter:
         - enter PIN if set
         """
         await self.keystore.unlock()
+        # If keystore already loaded a key (e.g., SeedKeeper auto-load),
+        # skip initmenu and go straight to mainmenu
+        if self.keystore.is_ready:
+            self.init_apps()
+            self.current_menu = self.mainmenu
         # now keystore is unlocked - we can load hosts configs
         for host in self.hosts:
             host.load_settings(self.keystore)

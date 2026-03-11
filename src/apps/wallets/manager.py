@@ -1,5 +1,5 @@
 from app import BaseApp
-from gui.screens import Menu, InputScreen, Prompt, TransactionScreen
+from gui.screens import Menu, InputScreen, Prompt, TransactionScreen, Alert
 from .screens import WalletScreen, ConfirmWalletScreen
 
 import platform
@@ -523,7 +523,11 @@ class WalletManager(BaseApp):
             der[1:],
             xpub.to_base58(self.Networks[self.network]["xpub"]),
         )
-        w = self.WalletClass.parse("Default&"+desc, path)
+        # Use wallet_label from SeedKeeper, otherwise "Default"
+        wallet_name = "Default"
+        if hasattr(self.keystore, 'wallet_label') and self.keystore.wallet_label:
+            wallet_name = self.keystore.wallet_label
+        w = self.WalletClass.parse(wallet_name+"&"+desc, path)
         # pass keystore to encrypt data
         w.save(self.keystore)
         platform.sync()

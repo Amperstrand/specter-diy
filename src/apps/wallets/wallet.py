@@ -117,6 +117,9 @@ class Wallet:
         desc = str(self.descriptor)
         keystore.save_aead(self.path + "/descriptor", plaintext=desc.encode())
         obj = {"gaps": self.gaps, "name": self.name, "unused_recv": self.unused_recv}
+        # Skip name persistence for SeedKeeper - it manages its own wallet_label
+        if hasattr(keystore, 'wallet_label'):
+            obj["name"] = keystore.wallet_label
         meta = json.dumps(obj).encode()
         keystore.save_aead(self.path + "/meta", plaintext=meta)
 
@@ -327,6 +330,9 @@ class Wallet:
             w.gaps = obj["gaps"]
         if "name" in obj:
             w.name = obj["name"]
+        # For SeedKeeper, use wallet_label from keystore if available
+        if hasattr(keystore, 'wallet_label') and keystore.wallet_label:
+            w.name = keystore.wallet_label
         if "unused_recv" in obj:
             w.unused_recv = obj["unused_recv"]
         # wallet has access to keystore only if it's saved or loaded from file
