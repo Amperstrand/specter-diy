@@ -10,7 +10,8 @@ This class provides common functionality for all JavaCard keystores:
 Both SeedKeeper and Satochip (and potentially MemoryCard) inherit from this class,eliminating ~130 lines of duplicated code.
 """
 import asyncio
-from gui.screens import Alert, Progress,from .core import KeyStoreError, PinError
+from gui.screens import Alert, Progress, PinScreen
+from .core import KeyStoreError, PinError
 from platform import CriticalErrorWipeImmediately
 
 
