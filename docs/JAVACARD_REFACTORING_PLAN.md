@@ -343,8 +343,8 @@ python3 test/run_tests.py
 
 | Phase | Task | Status | Commit |
 |-------|------|--------|--------|
-| 1.1 | Unit test infrastructure | 🔄 In Progress | |
-| 1.2 | Utility functions | ⬜ Not Started | |
+| 1.1 | Unit test infrastructure | ✅ Complete | b0dc63a |
+| 1.2 | Utility functions | ✅ Complete | c5d66a7 |
 **Status Legend:** ⬜ Not Started | 🔄 In Progress | ✅ Complete | ❌ Blocked
 
 ---
@@ -371,5 +371,4 @@ python3 test/run_tests.py
 ---
 
 ## Author
-Refactoring plan prepared March 11, 2026
-Last updated: Phase 1.1 in progress
+Last updated: Phase 1.1 and 1.2 complete
