@@ -33,14 +33,20 @@ class TestMode:
         self.specter = specter_ref  # Reference to Specter instance
         self.running = False
         
-    def find_satochip(self):
-        """Find Satochip keystore instance from active Specter."""
+    def find_javacard_keystore(self):
+        """Find any JavaCard keystore instance from active Specter.
+        
+        Returns the first available JavaCard keystore (Satochip, SeedKeeper, or MemoryCard).
+        """
         if self.specter is not None and hasattr(self.specter, 'keystore'):
             ks = self.specter.keystore
-            if ks is not None and hasattr(ks, 'NAME') and ks.NAME == "Satochip":
-                return ks
+            if ks is not None and hasattr(ks, 'NAME'):
+                if ks.NAME in ("Satochip", "SeedKeeper", "Smartcard"):
+                    return ks
         return None
-
+    
+    # Keep backward compatibility alias
+    find_satochip = find_javacard_keystore
     def _network_name(self):
         if self.specter is not None and hasattr(self.specter, 'network'):
             return self.specter.network
@@ -149,28 +155,29 @@ class TestMode:
     
     async def _cmd_status(self):
         """Get current status."""
-        satochip = self.find_satochip()
+        ks = self.find_javacard_keystore()
         status = {
-            "satochip_found": satochip is not None,
-            "card_inserted": satochip.connection.isCardInserted() if satochip else False,
-            "connected": getattr(satochip, 'connected', False) if satochip else False,
-            "unlocked": getattr(satochip, '_pin_unlocked', False) if satochip else False,
-            "fingerprint": hexlify(satochip.fingerprint).decode() if satochip and hasattr(satochip, 'fingerprint') and satochip.fingerprint else None,
+            "keystore_type": ks.NAME if ks else None,
+            "keystore_found": ks is not None,
+            "card_inserted": ks.connection.isCardInserted() if ks else False,
+            "connected": getattr(ks, 'connected', False) if ks else False,
+            "unlocked": getattr(ks, '_pin_unlocked', False) if ks else False,
+            "fingerprint": hexlify(ks.fingerprint).decode() if ks and hasattr(ks, 'fingerprint') and ks.fingerprint else None,
         }
         self._respond("OK:" + str(status))
-
     async def _cmd_boot_state(self):
         """Get detailed readiness state for boot diagnostics."""
-        satochip = self.find_satochip()
+        ks = self.find_javacard_keystore()
         state = {
-            "satochip_found": satochip is not None,
-            "card_inserted": satochip.connection.isCardInserted() if satochip else False,
-            "connected": getattr(satochip, 'connected', False) if satochip else False,
-            "unlocked": getattr(satochip, '_pin_unlocked', False) if satochip else False,
-            "is_ready": satochip.is_ready if satochip else False,
-            "fingerprint_set": bool(satochip and getattr(satochip, 'fingerprint', None)),
-            "idkey_set": bool(satochip and getattr(satochip, 'idkey', None)),
-            "secret_set": bool(satochip and getattr(satochip, 'secret', None)),
+            "keystore_type": ks.NAME if ks else None,
+            "keystore_found": ks is not None,
+            "card_inserted": ks.connection.isCardInserted() if ks else False,
+            "connected": getattr(ks, 'connected', False) if ks else False,
+            "unlocked": getattr(ks, '_pin_unlocked', False) if ks else False,
+            "is_ready": ks.is_ready if ks else False,
+            "fingerprint_set": bool(ks and getattr(ks, 'fingerprint', None)),
+            "idkey_set": bool(ks and getattr(ks, 'idkey', None)),
+            "secret_set": bool(ks and getattr(ks, 'secret', None)),
         }
         self._respond("OK:" + str(state))
 
@@ -180,28 +187,27 @@ class TestMode:
         timeout_ms = 30000
         elapsed = 0
         while elapsed < timeout_ms:
-            satochip = self.find_satochip()
-            if satochip and satochip.is_ready:
+            ks = self.find_javacard_keystore()
+            if ks and ks.is_ready:
                 self._respond("OK:ready")
                 return
             await asyncio.sleep_ms(500)
             elapsed += 500
         self._respond("ERROR:timeout_waiting_for_ready")
-
     async def _cmd_wallet_smoke(self):
         """Run AEAD roundtrip to verify keystore encryption key availability."""
-        satochip = self.find_satochip()
-        if not satochip:
-            self._respond("ERROR:Satochip not found")
+        ks = self.find_javacard_keystore()
+        if not ks:
+            self._respond("ERROR:JavaCard keystore not found")
             return
-        if not satochip.is_ready:
+        if not ks.is_ready:
             self._respond("ERROR:Keystore not ready")
             return
 
         test_file = "/flash/testmode_wallet_smoke.aead"
         try:
-            satochip.save_aead(test_file, adata=b"tm", plaintext=b"ok")
-            adata, plaintext = satochip.load_aead(test_file)
+            ks.save_aead(test_file, adata=b"tm", plaintext=b"ok")
+            adata, plaintext = ks.load_aead(test_file)
             if adata == b"tm" and plaintext == b"ok":
                 self._respond("OK:wallet_smoke_passed")
             else:
@@ -213,7 +219,6 @@ class TestMode:
                 os.remove(test_file)
             except Exception:
                 pass
-
     async def _cmd_screen(self):
         """Return active GUI screen information."""
         gui = getattr(self.specter, 'gui', None) if self.specter else None
@@ -276,116 +281,146 @@ class TestMode:
     
     async def _cmd_pin(self, pin):
         """Unlock with PIN."""
-        satochip = self.find_satochip()
-        if not satochip:
-            self._respond("ERROR:Satochip not found")
+        ks = self.find_javacard_keystore()
+        if not ks:
+            self._respond("ERROR:JavaCard keystore not found")
             return
-            
-        if not satochip.connection.isCardInserted():
+        
+        if not ks.connection.isCardInserted():
             self._respond("ERROR:No card inserted")
             return
-            
+        
         try:
             # Connect if needed
-            if not getattr(satochip, 'connected', False):
-                satochip.connection.connect(satochip.connection.T1_protocol)
-                satochip.applet.select()
-                satochip.applet.init_secure_channel()
-                satochip.connected = True
+            if not getattr(ks, 'connected', False):
+                ks.connection.connect(ks.connection.T1_protocol)
+                ks.applet.select()
+                ks.applet.init_secure_channel()
+                ks.connected = True
             
             # Verify PIN
-            satochip._unlock(pin)
+            ks._unlock(pin)
             self._respond("OK:PIN verified")
             
-            # Get authentikey for fingerprint
-            authentikey_bytes = satochip.applet.get_authentikey()
-            print("[TestMode] Authentikey length:", len(authentikey_bytes) if authentikey_bytes else 0)
-            if authentikey_bytes:
-                import hashlib
-                from helpers import tagged_hash
-                # Handle different authentikey formats:
-                # - 65 bytes: uncompressed pubkey (04 || x || y)
-                # - 107 bytes: might include additional data
-                if len(authentikey_bytes) == 65:
-                    x = authentikey_bytes[1:33]
-                    y_last = authentikey_bytes[64]
-                    prefix = b'\x03' if y_last % 2 else b'\x02'
-                    compressed = prefix + x
-                elif len(authentikey_bytes) >= 65:
-                    # Try to extract the 65-byte pubkey from the response
-                    # The pubkey might start at offset 0 or have a prefix
-                    x = authentikey_bytes[1:33]
-                    y_last = authentikey_bytes[64]
-                    prefix = b'\x03' if y_last % 2 else b'\x02'
-                    compressed = prefix + x
+            # Get keystore-specific identity information
+            keystore_type = ks.NAME if hasattr(ks, 'NAME') else 'Unknown'
+            
+            # For Satochip: get authentikey and derive fingerprint
+            if keystore_type == "Satochip":
+                authentikey_bytes = ks.applet.get_authentikey()
+                print("[TestMode] Authentikey length:", len(authentikey_bytes) if authentikey_bytes else 0)
+                
+                if authentikey_bytes:
+                    import hashlib
+                    from helpers import tagged_hash
+                    # Handle different authentikey formats
+                    if len(authentikey_bytes) == 65:
+                        x = authentikey_bytes[1:33]
+                        y_last = authentikey_bytes[64]
+                        prefix = b'\x03' if y_last % 2 else b'\x02'
+                        compressed = prefix + x
+                    elif len(authentikey_bytes) >= 65:
+                        x = authentikey_bytes[1:33]
+                        y_last = authentikey_bytes[64]
+                        prefix = b'\x03' if y_last % 2 else b'\x02'
+                        compressed = prefix + x
+                    else:
+                        print("[TestMode] Unexpected authentikey length:", len(authentikey_bytes))
+                        return
+                    
+                    sha256_hash = hashlib.sha256(compressed).digest()
+                    ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
+                    ks.fingerprint = ripemd160[:4]
+                    ks.idkey = tagged_hash("satochip idkey", compressed)
+                    print("[TestMode] Fingerprint:", hexlify(ks.fingerprint).decode())
+                    print("[TestMode] idkey set:", bool(ks.idkey))
+            
+            # For SeedKeeper: fingerprint is set when mnemonic is loaded
+            elif keystore_type == "SeedKeeper":
+                # fingerprint is already set by set_mnemonic()
+                if hasattr(ks, 'fingerprint') and ks.fingerprint:
+                    print("[TestMode] SeedKeeper fingerprint:", hexlify(ks.fingerprint).decode())
                 else:
-                    print("[TestMode] Unexpected authentikey length:", len(authentikey_bytes))
-                    return
-                sha256_hash = hashlib.sha256(compressed).digest()
-                ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
-                satochip.fingerprint = ripemd160[:4]
-                satochip.idkey = tagged_hash("satochip idkey", compressed)
-                print("[TestMode] Fingerprint:", hexlify(satochip.fingerprint).decode())
-                print("[TestMode] idkey set:", bool(satochip.idkey))
+                    print("[TestMode] SeedKeeper: fingerprint not yet set")
+            
+            # For MemoryCard: fingerprint is derived from card pubkey
+            elif keystore_type == "Smartcard":
+                if hasattr(ks, 'fingerprint') and ks.fingerprint:
+                    print("[TestMode] MemoryCard fingerprint:", hexlify(ks.fingerprint).decode())
+                else:
+                    print("[TestMode] MemoryCard: fingerprint not yet set")
+        
         except Exception as e:
             self._respond("ERROR:" + str(e))
-    
     async def _cmd_xpub(self, path):
         """Get XPUB at path."""
-        satochip = self.find_satochip()
-        if not satochip or not getattr(satochip, '_pin_unlocked', False):
+        ks = self.find_javacard_keystore()
+        if not ks or not getattr(ks, '_pin_unlocked', False):
             self._respond("ERROR:Not unlocked")
             return
-            
+        
+        # Only Satochip supports XPUB derivation from the card
+        if ks.NAME != "Satochip":
+            self._respond("ERROR:This keystore does not support XPUB derivation")
+            return
+        
         try:
-            xpub = satochip.get_xpub(path)
+            xpub = ks.get_xpub(path)
             xpub_str = str(xpub)
             self._respond("OK:" + xpub_str)
         except Exception as e:
             self._respond("ERROR:" + str(e))
-    
     async def _cmd_sign(self, sighash_hex):
         """Sign a sighash."""
-        satochip = self.find_satochip()
-        if not satochip or not getattr(satochip, '_pin_unlocked', False):
+        ks = self.find_javacard_keystore()
+        if not ks or not getattr(ks, '_pin_unlocked', False):
             self._respond("ERROR:Not unlocked")
             return
-            
+        
+        # Only Satochip supports signing
+        if ks.NAME != "Satochip":
+            self._respond("ERROR:This keystore does not support signing")
+            return
+        
         try:
             sighash = unhexlify(sighash_hex)
             if len(sighash) != 32:
                 self._respond("ERROR:Sighash must be 32 bytes")
                 return
-
+            
             path = self._default_account_path() + "/0/0"
-            signature = satochip.sign_hash(path, sighash)
+            signature = ks.sign_hash(path, sighash)
             self._respond("OK:" + hexlify(signature).decode())
         except Exception as e:
             self._respond("ERROR:" + str(e))
-
     async def _cmd_sign_at(self, payload):
         """Sign a sighash at an explicit path.
         Format: m/84h/1h/0h/0/0:<hex_sighash>
         """
-        satochip = self.find_satochip()
-        if not satochip or not getattr(satochip, '_pin_unlocked', False):
+        ks = self.find_javacard_keystore()
+        if not ks or not getattr(ks, '_pin_unlocked', False):
             self._respond("ERROR:Not unlocked")
             return
+        
+        # Only Satochip supports signing
+        if ks.NAME != "Satochip":
+            self._respond("ERROR:This keystore does not support signing")
+            return
+        
         if ':' not in payload:
             self._respond("ERROR:Invalid format, expected TEST_SIGN_AT:<path>:<hex_sighash>")
             return
-
+        
         try:
             path, sighash_hex = payload.rsplit(':', 1)
             sighash = unhexlify(sighash_hex)
             if len(sighash) != 32:
                 self._respond("ERROR:Sighash must be 32 bytes")
                 return
-            signature = satochip.sign_hash(path, sighash)
+            signature = ks.sign_hash(path, sighash)
             self._respond("OK:" + hexlify(signature).decode())
         except Exception as e:
             self._respond("ERROR:" + str(e))
-
     async def _cmd_set_network(self, net):
         """Set Specter active network and propagate to keystore/apps."""
         if self.specter is None or not hasattr(self.specter, 'set_network'):
@@ -403,30 +438,34 @@ class TestMode:
     
     async def _cmd_reset(self):
         """Reset connection."""
-        satochip = self.find_satochip()
-        if satochip:
+        ks = self.find_javacard_keystore()
+        if ks:
             try:
-                satochip.connection.disconnect()
+                ks.connection.disconnect()
             except:
                 pass
-            satochip.connected = False
-            satochip._pin_unlocked = False
+            ks.connected = False
+            ks._pin_unlocked = False
             self._respond("OK:Reset")
         else:
-            self._respond("ERROR:No Satochip")
-    
+            self._respond("ERROR:No JavaCard keystore found")
     async def _cmd_get_address(self, addr_arg):
-        """Get address at derivation path."
+        """Get address at derivation path.
         Format: m/84h/0h/0h/0/0 or m/84h/0h/0h:0 (account_path:index)
         """
-        satochip = self.find_satochip()
-        if not satochip or not satochip.is_ready:
+        ks = self.find_javacard_keystore()
+        if not ks or not ks.is_ready:
             self._respond("ERROR:Keystore not ready")
+            return
+        
+        # Only Satochip supports address generation from card
+        if ks.NAME != "Satochip":
+            self._respond("ERROR:This keystore does not support address generation")
             return
         
         try:
             # Parse argument
-            if ':' in addr_arg and not addr_arg.startswith('m:'):
+            if ':' in addr_arg and not addr_arg.startswith('m'):
                 # Format: account_path:index (e.g., m/84h/0h/0h:0)
                 account_path, idx_str = addr_arg.rsplit(':', 1)
                 idx = int(idx_str)
@@ -448,7 +487,7 @@ class TestMode:
             idx = int(path_parts[5].replace("'", "").replace("h", ""))
             
             # Get account xpub
-            xpub = satochip.get_xpub(account_path)
+            xpub = ks.get_xpub(account_path)
             print("[TestMode] Account XPUB:", str(xpub))
             
             # Derive address using embit
@@ -494,56 +533,91 @@ class TestMode:
             import sys
             sys.print_exception(e)
             self._respond("ERROR:" + str(e))
+
     
     async def _cmd_full_check(self):
-        """Run comprehensive verification of Satochip functionality."""
+        """Run comprehensive verification of JavaCard keystore functionality."""
         results = {}
         
         # 1. Check boot state
-        satochip = self.find_satochip()
-        results['satochip_found'] = satochip is not None
+        ks = self.find_javacard_keystore()
+        results['keystore_type'] = ks.NAME if ks else None
+        results['keystore_found'] = ks is not None
         
-        if not satochip:
-            self._respond("ERROR:Satochip not found")
+        if not ks:
+            self._respond("ERROR:JavaCard keystore not found")
             return
         
-        results['card_inserted'] = satochip.connection.isCardInserted() if satochip else False
-        results['connected'] = getattr(satochip, 'connected', False)
-        results['is_ready'] = satochip.is_ready
-        results['fingerprint_set'] = bool(getattr(satochip, 'fingerprint', None))
-        results['idkey_set'] = bool(getattr(satochip, 'idkey', None))
+        results['card_inserted'] = ks.connection.isCardInserted() if ks else False
+        results['connected'] = getattr(ks, 'connected', False)
+        results['is_ready'] = ks.is_ready
+        results['fingerprint_set'] = bool(getattr(ks, 'fingerprint', None))
         
-        if not satochip.is_ready:
+        if not ks.is_ready:
             self._respond("ERROR:Keystore not ready - " + str(results))
             return
         
-        # 2. Test XPUB derivation
-        try:
-            account_path = self._default_account_path()
-            xpub = satochip.get_xpub(account_path)
-            results['xpub_ok'] = True
-            results['xpub'] = str(xpub)[:20] + "..."  # Truncated for brevity
-            results['account_path'] = account_path
-        except Exception as e:
-            results['xpub_ok'] = False
-            results['xpub_error'] = str(e)
+        # Satochip-specific tests (XPUB, signing, address)
+        if ks.NAME == "Satochip":
+            results['idkey_set'] = bool(getattr(ks, 'idkey', None))
+            
+            # Test XPUB derivation
+            try:
+                account_path = self._default_account_path()
+                xpub = ks.get_xpub(account_path)
+                results['xpub_ok'] = True
+                results['xpub'] = str(xpub)[:20] + "..."
+                results['account_path'] = account_path
+            except Exception as e:
+                results['xpub_ok'] = False
+                results['xpub_error'] = str(e)
+            
+            # Test signing
+            try:
+                test_hash = b'\x00' * 32
+                sig = ks.sign_hash(self._default_account_path() + "/0/0", test_hash)
+                results['sign_ok'] = len(sig) > 0
+                results['sign_len'] = len(sig)
+            except Exception as e:
+                results['sign_ok'] = False
+                results['sign_error'] = str(e)
+            
+            # Test address generation
+            try:
+                from embit.networks import NETWORKS
+                from embit.script import p2wpkh
+                net = NETWORKS.get(self._network_name(), NETWORKS['main'])
+                expected_hrp = net.get('bech32', 'bc')
+                xpub = ks.get_xpub(self._default_account_path())
+                child = xpub.derive([0, 0])
+                address = p2wpkh(child).address(net)
+                results['address_ok'] = address.startswith(expected_hrp + '1')
+                results['address'] = address
+            except Exception as e:
+                results['address_ok'] = False
+                results['address_error'] = str(e)
         
-        # 3. Test signing
-        try:
-            # Use a deterministic test hash
-            test_hash = b'\x00' * 32
-            sig = satochip.sign_hash(self._default_account_path() + "/0/0", test_hash)
-            results['sign_ok'] = len(sig) > 0
-            results['sign_len'] = len(sig)
-        except Exception as e:
-            results['sign_ok'] = False
-            results['sign_error'] = str(e)
+        # SeedKeeper-specific
+        elif ks.NAME == "SeedKeeper":
+            results['xpub_ok'] = 'N/A'
+            results['sign_ok'] = 'N/A'
+            results['address_ok'] = 'N/A'
+            results['idkey_set'] = 'N/A'
+            results['mnemonic_loaded'] = bool(getattr(ks, 'fingerprint', None))
         
-        # 4. Test AEAD
+        # MemoryCard-specific
+        elif ks.NAME == "Smartcard":
+            results['xpub_ok'] = 'N/A'
+            results['sign_ok'] = 'N/A'
+            results['address_ok'] = 'N/A'
+            results['idkey_set'] = 'N/A'
+            results['is_key_saved'] = getattr(ks, 'is_key_saved', False)
+        
+        # Test AEAD (available for all keystores)
         try:
             test_file = "/flash/testmode_full_check.aead"
-            satochip.save_aead(test_file, adata=b"chk", plaintext=b"test")
-            adata, plaintext = satochip.load_aead(test_file)
+            ks.save_aead(test_file, adata=b"chk", plaintext=b"test")
+            adata, plaintext = ks.load_aead(test_file)
             results['aead_ok'] = (adata == b"chk" and plaintext == b"test")
             try:
                 os.remove(test_file)
@@ -553,36 +627,23 @@ class TestMode:
             results['aead_ok'] = False
             results['aead_error'] = str(e)
         
-        # 5. Test address generation
-        try:
-            # Get first receive address
-            from embit.networks import NETWORKS
-            from embit.script import p2wpkh
-            net_name = self._network_name()
-            net = NETWORKS.get(net_name, NETWORKS['main'])
-            expected_hrp = net.get('bech32', 'bc')
-
-            xpub = satochip.get_xpub(self._default_account_path())
-            child = xpub.derive([0, 0])  # First receive address
-            script_pubkey = p2wpkh(child)
-            address = script_pubkey.address(net)
-            results['address_ok'] = address.startswith(expected_hrp + '1')
-            results['address'] = address
-        except Exception as e:
-            results['address_ok'] = False
-            results['address_error'] = str(e)
-        
         # Summary
         all_ok = all([
-            results.get('satochip_found'),
+            results.get('keystore_found'),
             results.get('is_ready'),
-            results.get('fingerprint_set'),
-            results.get('idkey_set'),
-            results.get('xpub_ok'),
-            results.get('sign_ok'),
             results.get('aead_ok'),
-            results.get('address_ok'),
         ])
+        
+        # For Satochip, also require other tests
+        if results.get('keystore_type') == "Satochip":
+            all_ok = all_ok and all([
+                results.get('fingerprint_set'),
+                results.get('idkey_set'),
+                results.get('xpub_ok'),
+                results.get('sign_ok'),
+                results.get('address_ok'),
+            ])
+        
         results['ALL_OK'] = all_ok
         
         if all_ok:
