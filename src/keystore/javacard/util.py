@@ -137,10 +137,10 @@ def path_to_bytes(path_str: str) -> bytes:
 # ========================================
 
 def handle_pin_iso_exception(e, pin_attempts_max=5):
-    """Handle PIN-related ISO exceptions from JavaCard.
+    """Handle PIN-related exceptions from JavaCard.
     
     Args:
-        e: ISOException from applet communication
+        e: ISOException or SecureError from applet communication
         pin_attempts_max: Maximum PIN attempts (default 5)
     
     Returns:
@@ -150,25 +150,37 @@ def handle_pin_iso_exception(e, pin_attempts_max=5):
         - should_raise: True if an exception should be raised
         - exception_to_raise: The exception to raise (or original if unknown)
     
-    Status Words:
-        9C0C: Card bricked (SeedKeeper/Satochip specific)
-        6983: Card bricked (ISO standard - no more attempts)
-        63CX: Wrong PIN, X attempts remaining (X is hex digit)
+    Status Words (Satochip/SeedKeeper):
+        9C0C: Card bricked
+        6983: Card bricked (ISO standard)
+        63CX: Wrong PIN, X attempts remaining
+    
+    Error Codes (MemoryCard/SecureApplet):
+        0502: Wrong PIN
+        0503: Card bricked
     """
     from .applets.applet import ISOException
     from ..core import PinError
     from platform import CriticalErrorWipeImmediately
     
-    sw = str(e).lower()
+    err_str = str(e).lower()
     
+    # MemoryCard/SecureApplet error codes
+    if err_str == "0503":  # Bricked
+        return (0, True, CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!"))
+    
+    if err_str == "0502":  # Wrong PIN - attempts unknown from this code
+        return (None, True, PinError("Invalid PIN!"))
+    
+    # Satochip/SeedKeeper ISO status words
     # Card is bricked - no more attempts
-    if sw == "9c0c" or sw == "6983":
+    if err_str == "9c0c" or err_str == "6983":
         return (0, True, CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!"))
     
     # Wrong PIN: SW = 63Cx where x = remaining attempts
-    if sw.startswith("63c") and len(sw) == 4:
+    if err_str.startswith("63c") and len(err_str) == 4:
         try:
-            attempts_left = int(sw[3], 16)
+            attempts_left = int(err_str[3], 16)
         except ValueError:
             attempts_left = None
         
@@ -180,7 +192,7 @@ def handle_pin_iso_exception(e, pin_attempts_max=5):
             )
         return (None, True, PinError("Invalid PIN!"))
     
-    # Unknown status word - re-raise original exception
+    # Unknown error - re-raise original exception
     return (None, True, e)
 from binascii import hexlify
 import hashlib
