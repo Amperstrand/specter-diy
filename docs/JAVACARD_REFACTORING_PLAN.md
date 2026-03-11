@@ -1,15 +1,19 @@
 # JavaCard Keystore Refactoring Plan
 
 **Date:** March 11, 2026  
-**Status:** Planning Phase  
-**Branch:** master (clean state after commit 2373dae)
+**Status:** Phase 1 In Progress  
+**Branch:** master (clean state after commit 05a494a)
+
+**Related Documents:**
+- [JavaCard Comparative Analysis](./JAVACARD_COMPARATIVE_ANALYSIS.md) - Full analysis of all 3 keystores
+- [SeedKeeper Integration Strategy](./SEEDKEEPER_INTEGRATION_STRATEGY.md) - Original integration notes
 
 ---
 
 ## Executive Summary
 
 This document outlines a systematic refactoring of the JavaCard keystore implementations in specter-diy to:
-1. Eliminate ~200 lines of duplicated code
+1. Eliminate ~220 lines of duplicated code
 2. Create a unified base class for all JavaCard keystores
 3. Implement proper card type detection with positive identification
 4. Add comprehensive unit tests before each refactoring step
@@ -339,22 +343,8 @@ python3 test/run_tests.py
 
 | Phase | Task | Status | Commit |
 |-------|------|--------|--------|
-| 1.1 | Unit test infrastructure | ⬜ Not Started | |
+| 1.1 | Unit test infrastructure | 🔄 In Progress | |
 | 1.2 | Utility functions | ⬜ Not Started | |
-| 2.1 | SecureAppletBase tests | ⬜ Not Started | |
-| 2.2 | SecureAppletBase class | ⬜ Not Started | |
-| 3.1 | JavaCardKeyStore tests | ⬜ Not Started | |
-| 3.2 | JavaCardKeyStore class | ⬜ Not Started | |
-| 3.3 | Refactor SeedKeeper | ⬜ Not Started | |
-| 3.4 | Refactor Satochip | ⬜ Not Started | |
-| 3.5 | Refactor MemoryCard | ⬜ Not Started | |
-| 4.1 | Card detection tests | ⬜ Not Started | |
-| 4.2 | Card detection implementation | ⬜ Not Started | |
-| 4.3 | Update is_available() | ⬜ Not Started | |
-| 5.1 | Generic test mode | ⬜ Not Started | |
-| 6.1 | Remove dead code | ⬜ Not Started | |
-| 6.2 | Update documentation | ⬜ Not Started | |
-
 **Status Legend:** ⬜ Not Started | 🔄 In Progress | ✅ Complete | ❌ Blocked
 
 ---
@@ -381,5 +371,5 @@ python3 test/run_tests.py
 ---
 
 ## Author
-
 Refactoring plan prepared March 11, 2026
+Last updated: Phase 1.1 in progress
