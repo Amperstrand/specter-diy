@@ -204,6 +204,15 @@ class RAMKeyStore(KeyStore):
         to detect if the key is stored
         """
         return False
+    @property
+    def can_export_seed(self):
+        """
+        Override this property to return False
+        if the keystore cannot export the mnemonic/seed.
+        Hardware wallets like Satochip should return False.
+        """
+        return True
+
 
     @property
     def pin_attempts_left(self):
