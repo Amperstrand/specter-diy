@@ -262,26 +262,69 @@ class Satochip(JavaCardKeyStore):
                 raise KeyStoreError("Invalid menu")
 
     async def show_card_info(self):
+        """Display detailed card information."""
         print('[BootTrace][Satochip] show_card_info() called')
         try:
-            # Get authentikey and calculate fingerprint
-            authentikey_bytes = self.applet.get_authentikey()
-            if authentikey_bytes and len(authentikey_bytes) > 0:
-                # Use shared utility for fingerprint derivation
-                from .javacard.util import derive_fingerprint
-                fingerprint = derive_fingerprint(authentikey_bytes)
+            props = []
+            
+            # Get card status for version info
+            try:
+                resp_data, sw1, sw2 = self.applet.get_card_status()
+                status = self.applet.parse_status(resp_data)
                 
-                props = [
-                    "\n#7f8fa4 CARD INFO: #",
-                    "Card name: Satochip",
-                    "Fingerprint: %s" % hexlify(fingerprint).decode(),
-                ]
-            else:
-                props = [
-                    "\n#7f8fa4 CARD INFO: #",
-                    "Card name: Satochip",
-                    "No seed initialized",
-                ]
+                if status:
+                    version = "%s v%d.%d" % (
+                        self.applet.NAME,
+                        status.get('applet_major_version', 0),
+                        status.get('applet_minor_version', 0)
+                    )
+                    protocol = "Protocol v%d.%d" % (
+                        status.get('protocol_major_version', 0),
+                        status.get('protocol_minor_version', 0)
+                    )
+                    pin_attempts = status.get('PIN0_remaining_tries', '?')
+                    
+                    props.extend([
+                        "\n#7f8fa4 PLATFORM #",
+                        "Implementation: %s" % self.applet.platform,
+                        "Version: %s" % version,
+                        protocol,
+                    ])
+                else:
+                    props.extend([
+                        "\n#7f8fa4 PLATFORM #",
+                        "Implementation: %s" % self.applet.platform,
+                        "Version: %s v%s" % (self.applet.NAME, self.applet.version),
+                    ])
+                    pin_attempts = '?'
+            except Exception as e:
+                print('[Satochip] Failed to get card status:', e)
+                props.extend([
+                    "\n#7f8fa4 PLATFORM #",
+                    "Implementation: %s" % self.applet.platform,
+                    "Version: %s v%s" % (self.applet.NAME, self.applet.version),
+                ])
+                pin_attempts = '?'
+            
+            # Get authentikey and calculate fingerprint
+            props.append("\n#7f8fa4 KEY INFO: #")
+            try:
+                authentikey_bytes = self.applet.get_authentikey()
+                if authentikey_bytes and len(authentikey_bytes) > 0:
+                    # Use shared utility for fingerprint derivation
+                    from .javacard.util import derive_fingerprint
+                    fingerprint = derive_fingerprint(authentikey_bytes)
+                    
+                    props.append("Fingerprint: %s" % hexlify(fingerprint).decode())
+                    props.append("Seed initialized: Yes")
+                    props.append("PIN attempts left: %s" % pin_attempts)
+                else:
+                    props.append("Seed initialized: No")
+                    props.append("PIN attempts left: %s" % pin_attempts)
+            except Exception as e:
+                print('[Satochip] Failed to get authentikey:', e)
+                props.append("Seed status: Unknown")
+            
             scr = Alert("Satochip info", "\n\n".join(props))
             scr.message.set_recolor(True)
             await self.show(scr)

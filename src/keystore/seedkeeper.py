@@ -326,14 +326,54 @@ class SeedKeeper(JavaCardKeyStore):
                 raise KeyStoreError("Invalid menu")
 
     async def show_card_info(self):
-        """Display card information."""
+        """Display detailed card information."""
         try:
+            props = []
+            
+            # Get card label if available
+            card_label = None
+            try:
+                card_label = self.applet.get_card_label()
+            except Exception as e:
+                print('[SeedKeeper] Card label not available:', e)
+            
+            # Platform info
+            props.extend([
+                "\n#7f8fa4 PLATFORM #",
+                "Implementation: %s" % self.applet.platform,
+                "Version: %s v%s" % (self.applet.NAME, self.applet.version),
+            ])
+            
+            if card_label:
+                props.append("Card label: %s" % card_label)
+            
+            # Get detailed card status
             status = self.applet.get_seedkeeper_status()
-            props = [
-                "\n#7f8fa4 CARD INFO: #",
-                "Card name: SeedKeeper",
-                "Secrets stored: %d" % status.get("nb_secrets", 0),
-            ]
+            
+            if status:
+                props.extend([
+                    "\n#7f8fa4 STORAGE INFO #",
+                    "Secrets stored: %d" % status.get('nb_secrets', 0),
+                ])
+                
+                # Memory info
+                total_mem = status.get('total_memory', 0)
+                free_mem = status.get('free_memory', 0)
+                if total_mem > 0:
+                    used_mem = total_mem - free_mem
+                    props.append("Memory used: %d / %d bytes" % (used_mem, total_mem))
+                
+                # Log info
+                nb_logs_total = status.get('nb_logs_total', 0)
+                nb_logs_avail = status.get('nb_logs_avail', 0)
+                if nb_logs_total > 0:
+                    props.append("Logs available: %d / %d" % (nb_logs_avail, nb_logs_total))
+            else:
+                props.extend([
+                    "\n#7f8fa4 STORAGE INFO #",
+                    "Status: Unable to read",
+                ])
+            
             scr = Alert("SeedKeeper info", "\n\n".join(props))
             scr.message.set_recolor(True)
             await self.show(scr)
