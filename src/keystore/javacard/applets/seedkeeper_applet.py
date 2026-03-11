@@ -1,14 +1,12 @@
-"""
-SeedKeeper applet for Satochip SeedKeeper card communication.
-Inherits from Applet (NOT SecureApplet) - SeedKeeper uses its own PIN protocol.
-"""
-from .applet import Applet, ISOException, AppletException
+from .secure_applet_base import SecureAppletBase
+from .applet import ISOException, AppletException
 from binascii import hexlify
 from embit import bip39
-from .seedkeeper_securechannel import SeedKeeperSecureChannel
-
-class SeedKeeperApplet(Applet):
-    """Applet for communicating with SeedKeeper cards."""
+class SeedKeeperApplet(SecureAppletBase):
+    """Applet for communicating with SeedKeeper cards.
+    
+    Inherits secure channel functionality from SecureAppletBase.
+    """
 
     # SeedKeeper AID (Application Identifier) - ASCII "SeedKeeper"
     AID = bytes([0x53, 0x65, 0x65, 0x64, 0x4B, 0x65, 0x65, 0x70, 0x65, 0x72])
@@ -32,44 +30,8 @@ class SeedKeeperApplet(Applet):
     def __init__(self, connection):
         """Initialize with card connection."""
         super().__init__(connection, self.AID)
-        self.sc = SeedKeeperSecureChannel()
         print("[SeedKeeper] Applet initialized")
 
-    def init_secure_channel(self):
-        """Initialize secure channel. WARNING: select() MUST precede this. NEVER re-select after SC init."""
-        print("[SeedKeeper] Establishing secure channel...")
-        self.sc.initiate(self.conn)
-        print("[SeedKeeper] Secure channel established")
-
-    def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
-        """Send APDU via secure channel (INS 0x82).
-        If retry=True and card returns 9c30 (Secure Channel Required), 
-        re-establish secure channel and retry once.
-        """
-        if not self.sc.is_initialized:
-            raise AppletException("Secure channel not initialized")
-
-        encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
-        data = self.conn.transmit(encrypted_apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
-        sw = bytes([sw1, sw2])
-        
-        # Handle 9c30 - Secure Channel Required (corrupted channel)
-        if sw == b"\x9c\x30" and retry:
-            print("[SeedKeeper] Secure channel corrupted (9c30), re-establishing...")
-            # Re-establish secure channel
-            self.sc.initiate(self.conn)
-            # Retry command once with fresh encryption
-            encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
-            data = self.conn.transmit(encrypted_apdu)
-            resp_data, sw1, sw2 = data[0], data[1], data[2]
-            sw = bytes([sw1, sw2])
-        
-        if sw != b"\x90\x00":
-            raise ISOException(hexlify(sw).decode())
-        if len(resp_data) > 0:
-            return self.sc.decrypt_response(resp_data)
-        return b''
 
     def get_seedkeeper_status(self):
         """

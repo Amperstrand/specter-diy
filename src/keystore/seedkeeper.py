@@ -1,14 +1,12 @@
 from .core import KeyStoreError, PinError
-from .ram import RAMKeyStore
+from .javacard_keystore import JavaCardKeyStore
 from .javacard.applets.seedkeeper_applet import SeedKeeperApplet
-from .javacard.applets.applet import ISOException, AppletException
-from .javacard.util import get_connection
-from platform import CriticalErrorWipeImmediately
+from .javacard.applets.applet import AppletException
 import asyncio
-from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
+from gui.screens import Alert, Menu, Progress
 
 
-class SeedKeeper(RAMKeyStore):
+class SeedKeeper(JavaCardKeyStore):
     """
     KeyStore that loads secrets from a SeedKeeper smartcard.
     SeedKeeper is a read-only keystore - secrets are generated and stored
@@ -21,15 +19,12 @@ class SeedKeeper(RAMKeyStore):
     # Button to go to storage menu
     storage_button = "SeedKeeper storage"
     load_button = "Open SeedKeeper card"
-    # javacard connection
-    connection = get_connection()
 
     def __init__(self):
         super().__init__()
-        # applet
+        # applet instance
         self.applet = SeedKeeperApplet(self.connection)
-        self._pin_unlocked = False
-        self.connected = False
+        # SeedKeeper-specific state
         self.wallet_label = "SeedKeeper"
         self.selected_secret_id = None
 
@@ -69,58 +64,10 @@ class SeedKeeper(RAMKeyStore):
             return False
 
     @property
-    def is_pin_set(self):
-        """SeedKeeper always has PIN set."""
-        return True
-
-    @property
-    def is_locked(self):
-        """Returns True if PIN has not been verified yet."""
-        return not self._pin_unlocked
-
-    @property
     def is_ready(self):
         """Returns True if connected, unlocked, and has a fingerprint."""
         return self.connected and self._pin_unlocked and self.fingerprint is not None
 
-    def _unlock(self, pin):
-        """
-        Unlock the keystore by verifying PIN on the card.
-        Raises PinError if PIN is invalid.
-        Raises CriticalErrorWipeImmediately if no attempts left.
-        """
-        try:
-            success, attempts = self.applet.verify_pin(pin)
-            if success:
-                self._pin_unlocked = True
-                return
-            # Not successful - this shouldn't happen as verify_pin raises on failure
-            if attempts is not None:
-                raise PinError("Invalid PIN!\n%d attempts left..." % attempts)
-        except ISOException as e:
-            # Handle specific ISO exceptions based on status word
-            sw = str(e).lower()
-            # Card is bricked - no more attempts
-            if sw == "9c0c" or sw == "6983":
-                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
-            # Wrong PIN: SW = 63Cx where x = remaining attempts
-            if sw.startswith("63c") and len(sw) == 4:
-                try:
-                    attempts_left = int(sw[3], 16)
-                except ValueError:
-                    attempts_left = None
-                if attempts_left is not None:
-                    raise PinError(
-                        "Invalid PIN!\n%d attempts left..." % attempts_left
-                    )
-                raise PinError("Invalid PIN!")
-            # Any other ISO error is unexpected here
-            raise
-        except AppletException as e:
-            # Handle applet-level exceptions
-            if "6983" in str(e) or "9c0c" in str(e):
-                raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
-            raise
     async def unlock(self):
         """Override: prompt for PIN via touchscreen, then auto-load mnemonic."""
         print('[BootTrace][SeedKeeper] unlock() called')
@@ -274,26 +221,6 @@ class SeedKeeper(RAMKeyStore):
             pin = await self.get_pin()
             self._unlock(pin)
 
-    async def wait_for_card(self, scr):
-        """Wait for card insertion."""
-        while not self.connection.isCardInserted():
-            await asyncio.sleep_ms(30)
-            scr.tick(5)
-        if scr.waiting:
-            scr.waiting = False
-
-    async def init(self, show_fn, show_loader):
-        """
-        Waits for keystore media
-        and loads internal secret and PIN state
-        """
-        self.show_loader = show_loader
-        self.show = show_fn
-
-        await self.check_card()
-        # the rest can be done with parent
-        await super().init(show_fn, show_loader)
-
     async def load_mnemonic(self):
         """Load mnemonic from SeedKeeper card."""
         await self.check_card(check_pin=True)
@@ -358,13 +285,6 @@ class SeedKeeper(RAMKeyStore):
         
         print("[SeedKeeper] Loaded mnemonic successfully")
         return True
-        """Load mnemonic from SeedKeeper card."""
-        await self.check_card(check_pin=True)
-        self.show_loader("Loading secret from the card...")
-        mnemonic = self.applet.get_bip39_secret()
-        self.set_mnemonic(mnemonic, "")
-        print("[SeedKeeper] Loaded mnemonic successfully")
-        return True
 
     async def save_mnemonic(self):
         """SeedKeeper is read-only - cannot save mnemonic to card."""
@@ -375,13 +295,6 @@ class SeedKeeper(RAMKeyStore):
         """SeedKeeper always has a key saved (on the card)."""
         return self._pin_unlocked
 
-    async def get_pin(self, title="Enter your PIN code", subtitle=None, note=None, with_cancel=False):
-        """
-        Override to NOT pass get_word parameter.
-        SeedKeeper doesn't support anti-phishing words.
-        """
-        scr = PinScreen(title=title, note=note, get_word=None, subtitle=subtitle, with_cancel=with_cancel)
-        return await self.show(scr)
 
     async def storage_menu(self):
         """Manage storage, return True if new key was loaded."""
