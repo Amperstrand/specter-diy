@@ -5,7 +5,17 @@ Commands:
   TEST_PIN:1234           - Unlock with PIN
   TEST_XPUB:m/84h/0h/0h   - Get XPUB at path
   TEST_SIGN:<hex_sighash> - Sign a 32-byte sighash
+  TEST_SIGN_AT:<path>:<hex_sighash> - Sign hash at explicit derivation path
+  TEST_SET_NETWORK:<net>  - Set device network (main/test/signet/regtest)
+  TEST_GET_ADDRESS:<path>:<index> - Get address at derivation path
+  TEST_FULL_CHECK         - Comprehensive verification (boot, xpub, sign, address)
   TEST_STATUS             - Get current status
+  TEST_BOOT_STATE         - Get detailed boot/readiness state
+  TEST_WAIT_READY         - Wait until keystore is ready
+  TEST_WALLET_SMOKE       - AEAD roundtrip smoke test using keystore
+  TEST_SCREEN             - Get active GUI screen class/title
+  TEST_UI_SET:<value>     - Set active screen result value (menus/prompts)
+  TEST_UI_PIN:<digits>    - Enter PIN on active PinScreen and submit
   TEST_RESET              - Reset connection
 
 Responses:
@@ -14,7 +24,9 @@ Responses:
 """
 
 import sys
+import os
 from binascii import hexlify, unhexlify
+
 
 class TestMode:
     def __init__(self, specter_ref=None):
@@ -28,6 +40,19 @@ class TestMode:
             if ks is not None and hasattr(ks, 'NAME') and ks.NAME == "Satochip":
                 return ks
         return None
+
+    def _network_name(self):
+        if self.specter is not None and hasattr(self.specter, 'network'):
+            return self.specter.network
+        return 'main'
+
+    def _coin_type(self):
+        from embit.networks import NETWORKS
+        net = NETWORKS.get(self._network_name(), NETWORKS['main'])
+        return net.get('bip32', 0)
+
+    def _default_account_path(self):
+        return "m/84h/%dh/0h" % self._coin_type()
     
     async def _command_loop(self):
         """Main command processing loop - called from Specter.setup()."""
@@ -85,8 +110,34 @@ class TestMode:
             elif cmd.startswith("TEST_SIGN:"):
                 sighash_hex = cmd[10:]
                 await self._cmd_sign(sighash_hex)
+            elif cmd.startswith("TEST_SIGN_AT:"):
+                payload = cmd[13:]
+                await self._cmd_sign_at(payload)
+            elif cmd.startswith("TEST_SET_NETWORK:"):
+                net = cmd[17:]
+                await self._cmd_set_network(net)
             elif cmd == "TEST_RESET":
                 await self._cmd_reset()
+            elif cmd == "TEST_BOOT_STATE":
+                await self._cmd_boot_state()
+            elif cmd == "TEST_WAIT_READY":
+                await self._cmd_wait_ready()
+            elif cmd == "TEST_WALLET_SMOKE":
+                await self._cmd_wallet_smoke()
+            elif cmd == "TEST_SCREEN":
+                await self._cmd_screen()
+            elif cmd.startswith("TEST_UI_SET:"):
+                value = cmd[12:]
+                await self._cmd_ui_set(value)
+            elif cmd.startswith("TEST_UI_PIN:"):
+                pin = cmd[12:]
+                await self._cmd_ui_pin(pin)
+            elif cmd.startswith("TEST_GET_ADDRESS:"):
+                # Format: TEST_GET_ADDRESS:m/84h/0h/0h/0/0 or TEST_GET_ADDRESS:m/84h/0h/0h:0
+                addr_arg = cmd[17:]
+                await self._cmd_get_address(addr_arg)
+            elif cmd == "TEST_FULL_CHECK":
+                await self._cmd_full_check()
             else:
                 self._respond("ERROR:Unknown command")
         except Exception as e:
@@ -107,6 +158,121 @@ class TestMode:
             "fingerprint": hexlify(satochip.fingerprint).decode() if satochip and hasattr(satochip, 'fingerprint') and satochip.fingerprint else None,
         }
         self._respond("OK:" + str(status))
+
+    async def _cmd_boot_state(self):
+        """Get detailed readiness state for boot diagnostics."""
+        satochip = self.find_satochip()
+        state = {
+            "satochip_found": satochip is not None,
+            "card_inserted": satochip.connection.isCardInserted() if satochip else False,
+            "connected": getattr(satochip, 'connected', False) if satochip else False,
+            "unlocked": getattr(satochip, '_pin_unlocked', False) if satochip else False,
+            "is_ready": satochip.is_ready if satochip else False,
+            "fingerprint_set": bool(satochip and getattr(satochip, 'fingerprint', None)),
+            "idkey_set": bool(satochip and getattr(satochip, 'idkey', None)),
+            "secret_set": bool(satochip and getattr(satochip, 'secret', None)),
+        }
+        self._respond("OK:" + str(state))
+
+    async def _cmd_wait_ready(self):
+        """Wait up to 30s for keystore readiness."""
+        import asyncio
+        timeout_ms = 30000
+        elapsed = 0
+        while elapsed < timeout_ms:
+            satochip = self.find_satochip()
+            if satochip and satochip.is_ready:
+                self._respond("OK:ready")
+                return
+            await asyncio.sleep_ms(500)
+            elapsed += 500
+        self._respond("ERROR:timeout_waiting_for_ready")
+
+    async def _cmd_wallet_smoke(self):
+        """Run AEAD roundtrip to verify keystore encryption key availability."""
+        satochip = self.find_satochip()
+        if not satochip:
+            self._respond("ERROR:Satochip not found")
+            return
+        if not satochip.is_ready:
+            self._respond("ERROR:Keystore not ready")
+            return
+
+        test_file = "/flash/testmode_wallet_smoke.aead"
+        try:
+            satochip.save_aead(test_file, adata=b"tm", plaintext=b"ok")
+            adata, plaintext = satochip.load_aead(test_file)
+            if adata == b"tm" and plaintext == b"ok":
+                self._respond("OK:wallet_smoke_passed")
+            else:
+                self._respond("ERROR:wallet_smoke_mismatch")
+        except Exception as e:
+            self._respond("ERROR:" + str(e))
+        finally:
+            try:
+                os.remove(test_file)
+            except Exception:
+                pass
+
+    async def _cmd_screen(self):
+        """Return active GUI screen information."""
+        gui = getattr(self.specter, 'gui', None) if self.specter else None
+        scr = getattr(gui, 'scr', None) if gui else None
+        if scr is None:
+            self._respond("ERROR:No active screen")
+            return
+        title = None
+        if hasattr(scr, 'title') and scr.title is not None and hasattr(scr.title, 'get_text'):
+            try:
+                title = scr.title.get_text()
+            except Exception:
+                title = None
+        waiting = getattr(scr, 'waiting', None)
+        self._respond("OK:" + str({
+            "screen": type(scr).__name__,
+            "title": title,
+            "waiting": waiting,
+        }))
+
+    async def _cmd_ui_set(self, raw_value):
+        """Set active screen value for Menu/Prompt-style screens."""
+        gui = getattr(self.specter, 'gui', None) if self.specter else None
+        scr = getattr(gui, 'scr', None) if gui else None
+        if scr is None:
+            self._respond("ERROR:No active screen")
+            return
+        value = raw_value
+        if raw_value.isdigit() or (raw_value.startswith('-') and raw_value[1:].isdigit()):
+            value = int(raw_value)
+        elif raw_value.lower() == 'true':
+            value = True
+        elif raw_value.lower() == 'false':
+            value = False
+        try:
+            scr.set_value(value)
+            self._respond("OK:UI value set")
+        except Exception as e:
+            self._respond("ERROR:" + str(e))
+
+    async def _cmd_ui_pin(self, pin):
+        """Enter PIN on active PinScreen and submit."""
+        gui = getattr(self.specter, 'gui', None) if self.specter else None
+        scr = getattr(gui, 'scr', None) if gui else None
+        if scr is None:
+            self._respond("ERROR:No active screen")
+            return
+        if not hasattr(scr, 'pin') or not hasattr(scr.pin, 'set_text'):
+            self._respond("ERROR:Active screen is not PinScreen")
+            return
+        try:
+            scr.pin.set_text(pin)
+            if hasattr(scr, 'submit'):
+                scr.submit()
+            else:
+                scr.release()
+            self._respond("OK:PIN entered")
+        except Exception as e:
+            self._respond("ERROR:" + str(e))
     
     async def _cmd_pin(self, pin):
         """Unlock with PIN."""
@@ -136,6 +302,7 @@ class TestMode:
             print("[TestMode] Authentikey length:", len(authentikey_bytes) if authentikey_bytes else 0)
             if authentikey_bytes:
                 import hashlib
+                from helpers import tagged_hash
                 # Handle different authentikey formats:
                 # - 65 bytes: uncompressed pubkey (04 || x || y)
                 # - 107 bytes: might include additional data
@@ -157,7 +324,9 @@ class TestMode:
                 sha256_hash = hashlib.sha256(compressed).digest()
                 ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
                 satochip.fingerprint = ripemd160[:4]
+                satochip.idkey = tagged_hash("satochip idkey", compressed)
                 print("[TestMode] Fingerprint:", hexlify(satochip.fingerprint).decode())
+                print("[TestMode] idkey set:", bool(satochip.idkey))
         except Exception as e:
             self._respond("ERROR:" + str(e))
     
@@ -187,9 +356,48 @@ class TestMode:
             if len(sighash) != 32:
                 self._respond("ERROR:Sighash must be 32 bytes")
                 return
-                
-            signature = satochip.applet.sign_transaction_hash(0xFF, sighash)
+
+            path = self._default_account_path() + "/0/0"
+            signature = satochip.sign_hash(path, sighash)
             self._respond("OK:" + hexlify(signature).decode())
+        except Exception as e:
+            self._respond("ERROR:" + str(e))
+
+    async def _cmd_sign_at(self, payload):
+        """Sign a sighash at an explicit path.
+        Format: m/84h/1h/0h/0/0:<hex_sighash>
+        """
+        satochip = self.find_satochip()
+        if not satochip or not getattr(satochip, '_pin_unlocked', False):
+            self._respond("ERROR:Not unlocked")
+            return
+        if ':' not in payload:
+            self._respond("ERROR:Invalid format, expected TEST_SIGN_AT:<path>:<hex_sighash>")
+            return
+
+        try:
+            path, sighash_hex = payload.rsplit(':', 1)
+            sighash = unhexlify(sighash_hex)
+            if len(sighash) != 32:
+                self._respond("ERROR:Sighash must be 32 bytes")
+                return
+            signature = satochip.sign_hash(path, sighash)
+            self._respond("OK:" + hexlify(signature).decode())
+        except Exception as e:
+            self._respond("ERROR:" + str(e))
+
+    async def _cmd_set_network(self, net):
+        """Set Specter active network and propagate to keystore/apps."""
+        if self.specter is None or not hasattr(self.specter, 'set_network'):
+            self._respond("ERROR:Specter reference not available")
+            return
+        valid = {'main', 'test', 'signet', 'regtest'}
+        if net not in valid:
+            self._respond("ERROR:Unsupported network")
+            return
+        try:
+            self.specter.set_network(net)
+            self._respond("OK:network_set:" + net)
         except Exception as e:
             self._respond("ERROR:" + str(e))
     
@@ -206,3 +414,178 @@ class TestMode:
             self._respond("OK:Reset")
         else:
             self._respond("ERROR:No Satochip")
+    
+    async def _cmd_get_address(self, addr_arg):
+        """Get address at derivation path."
+        Format: m/84h/0h/0h/0/0 or m/84h/0h/0h:0 (account_path:index)
+        """
+        satochip = self.find_satochip()
+        if not satochip or not satochip.is_ready:
+            self._respond("ERROR:Keystore not ready")
+            return
+        
+        try:
+            # Parse argument
+            if ':' in addr_arg and not addr_arg.startswith('m:'):
+                # Format: account_path:index (e.g., m/84h/0h/0h:0)
+                account_path, idx_str = addr_arg.rsplit(':', 1)
+                idx = int(idx_str)
+                full_path = account_path + "/0/" + str(idx)  # receive branch
+            else:
+                # Format: full path (e.g., m/84h/0h/0h/0/0)
+                full_path = addr_arg
+            
+            print("[TestMode] Getting address for path:", full_path)
+            
+            # Get xpub at account level
+            path_parts = full_path.split('/')
+            if len(path_parts) < 6:
+                self._respond("ERROR:Path too short, need at least m/purpose/coin/account/branch/index")
+                return
+            
+            account_path = '/'.join(path_parts[:4])  # m/84h/0h/0h
+            branch = int(path_parts[4].replace("'", "").replace("h", ""))
+            idx = int(path_parts[5].replace("'", "").replace("h", ""))
+            
+            # Get account xpub
+            xpub = satochip.get_xpub(account_path)
+            print("[TestMode] Account XPUB:", str(xpub))
+            
+            # Derive address using embit
+            from embit.networks import NETWORKS
+            from embit import bip32
+            net_name = self._network_name()
+            net = NETWORKS.get(net_name, NETWORKS['main'])
+            
+            # Derive child key at branch/index
+            child = xpub.derive([branch, idx])
+            
+            # Generate address based on purpose (assume native segwit for now)
+            # For m/84h paths - native segwit (bc1)
+            # For m/49h paths - nested segwit (3)
+            # For m/44h paths - legacy (1)
+            purpose = int(path_parts[1].replace("'", "").replace("h", ""))
+            
+            if purpose == 84:
+                # Native segwit - P2WPKH
+                from embit.script import p2wpkh
+                script_pubkey = p2wpkh(child)
+                address = script_pubkey.address(net)
+            elif purpose == 49:
+                # Nested segwit - P2SH-P2WPKH
+                from embit.script import p2sh, p2wpkh
+                script_pubkey = p2sh(p2wpkh(child))
+                address = script_pubkey.address(net)
+            elif purpose == 44:
+                # Legacy - P2PKH
+                from embit.script import p2pkh
+                script_pubkey = p2pkh(child)
+                address = script_pubkey.address(net)
+            else:
+                # Default to native segwit
+                from embit.script import p2wpkh
+                script_pubkey = p2wpkh(child)
+                address = script_pubkey.address(net)
+            
+            self._respond("OK:" + address)
+            
+        except Exception as e:
+            print("[TestMode] _cmd_get_address error:", e)
+            import sys
+            sys.print_exception(e)
+            self._respond("ERROR:" + str(e))
+    
+    async def _cmd_full_check(self):
+        """Run comprehensive verification of Satochip functionality."""
+        results = {}
+        
+        # 1. Check boot state
+        satochip = self.find_satochip()
+        results['satochip_found'] = satochip is not None
+        
+        if not satochip:
+            self._respond("ERROR:Satochip not found")
+            return
+        
+        results['card_inserted'] = satochip.connection.isCardInserted() if satochip else False
+        results['connected'] = getattr(satochip, 'connected', False)
+        results['is_ready'] = satochip.is_ready
+        results['fingerprint_set'] = bool(getattr(satochip, 'fingerprint', None))
+        results['idkey_set'] = bool(getattr(satochip, 'idkey', None))
+        
+        if not satochip.is_ready:
+            self._respond("ERROR:Keystore not ready - " + str(results))
+            return
+        
+        # 2. Test XPUB derivation
+        try:
+            account_path = self._default_account_path()
+            xpub = satochip.get_xpub(account_path)
+            results['xpub_ok'] = True
+            results['xpub'] = str(xpub)[:20] + "..."  # Truncated for brevity
+            results['account_path'] = account_path
+        except Exception as e:
+            results['xpub_ok'] = False
+            results['xpub_error'] = str(e)
+        
+        # 3. Test signing
+        try:
+            # Use a deterministic test hash
+            test_hash = b'\x00' * 32
+            sig = satochip.sign_hash(self._default_account_path() + "/0/0", test_hash)
+            results['sign_ok'] = len(sig) > 0
+            results['sign_len'] = len(sig)
+        except Exception as e:
+            results['sign_ok'] = False
+            results['sign_error'] = str(e)
+        
+        # 4. Test AEAD
+        try:
+            test_file = "/flash/testmode_full_check.aead"
+            satochip.save_aead(test_file, adata=b"chk", plaintext=b"test")
+            adata, plaintext = satochip.load_aead(test_file)
+            results['aead_ok'] = (adata == b"chk" and plaintext == b"test")
+            try:
+                os.remove(test_file)
+            except:
+                pass
+        except Exception as e:
+            results['aead_ok'] = False
+            results['aead_error'] = str(e)
+        
+        # 5. Test address generation
+        try:
+            # Get first receive address
+            from embit.networks import NETWORKS
+            from embit.script import p2wpkh
+            net_name = self._network_name()
+            net = NETWORKS.get(net_name, NETWORKS['main'])
+            expected_hrp = net.get('bech32', 'bc')
+
+            xpub = satochip.get_xpub(self._default_account_path())
+            child = xpub.derive([0, 0])  # First receive address
+            script_pubkey = p2wpkh(child)
+            address = script_pubkey.address(net)
+            results['address_ok'] = address.startswith(expected_hrp + '1')
+            results['address'] = address
+        except Exception as e:
+            results['address_ok'] = False
+            results['address_error'] = str(e)
+        
+        # Summary
+        all_ok = all([
+            results.get('satochip_found'),
+            results.get('is_ready'),
+            results.get('fingerprint_set'),
+            results.get('idkey_set'),
+            results.get('xpub_ok'),
+            results.get('sign_ok'),
+            results.get('aead_ok'),
+            results.get('address_ok'),
+        ])
+        results['ALL_OK'] = all_ok
+        
+        if all_ok:
+            self._respond("OK:FULL_CHECK_PASSED - " + str(results))
+        else:
+            self._respond("ERROR:FULL_CHECK_FAILED - " + str(results))

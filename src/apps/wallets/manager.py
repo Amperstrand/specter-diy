@@ -553,6 +553,8 @@ class WalletManager(BaseApp):
             w = self.WalletClass.parse(desc)
         except Exception as e:
             raise WalletError("Can't parse descriptor\n\n%s" % str(e))
+        if w.descriptor.is_taproot and not getattr(self.keystore, "supports_taproot", True):
+            raise WalletError("Taproot wallets are not supported by this keystore")
         if str(w.descriptor) in [str(ww.descriptor) for ww in self.wallets]:
             raise WalletError("Wallet with this descriptor already exists")
         # check that xpubs and tpubs are not mixed in the same descriptor:

@@ -8,6 +8,8 @@ import asyncio
 from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
 from embit.transaction import SIGHASH
 from embit import bip32
+from embit.networks import NETWORKS
+from binascii import hexlify
 
 class Satochip(RAMKeyStore):
     """
@@ -32,6 +34,7 @@ class Satochip(RAMKeyStore):
         self._pin_unlocked = False
         self.connected = False
         self.wallet_label = "Satochip"
+        self.network = "main"
 
     @classmethod
     def is_available(cls):
@@ -65,13 +68,62 @@ class Satochip(RAMKeyStore):
 
     @property
     def is_ready(self):
-        """Returns True if connected, unlocked, and has a fingerprint."""
-        return self.connected and self._pin_unlocked and self.fingerprint is not None
+        """Returns True if connected, unlocked, and identity keys are set."""
+        return (
+            self.connected
+            and self._pin_unlocked
+            and self.fingerprint is not None
+            and self.idkey is not None
+        )
     
     @property
     def can_export_seed(self):
         """Satochip cannot export the mnemonic - seed stays on card."""
         return False
+
+    @property
+    def supports_taproot(self):
+        return False
+
+    def set_network(self, network):
+        self.network = network
+
+    def _is_mainnet(self):
+        net = NETWORKS.get(self.network, NETWORKS["main"])
+        return net.get("bip32", 0) == 0
+
+    def _infer_xtype(self, path):
+        if not isinstance(path, str):
+            return "p2wpkh"
+        if not path.startswith("m/"):
+            return "p2wpkh"
+        parts = [p for p in path.split("/") if p]
+        if len(parts) < 2:
+            return "p2wpkh"
+        try:
+            purpose = int(parts[1].rstrip("h'"))
+        except Exception:
+            return "p2wpkh"
+        if purpose == 44:
+            return "standard"
+        if purpose == 49:
+            return "p2wpkh-p2sh"
+        if purpose == 84:
+            return "p2wpkh"
+        if purpose == 86:
+            return "standard"
+        if purpose == 48:
+            if len(parts) >= 5:
+                try:
+                    script_branch = int(parts[4].rstrip("h'"))
+                    if script_branch == 1:
+                        return "p2wsh-p2sh"
+                    if script_branch == 2:
+                        return "p2wsh"
+                except Exception:
+                    pass
+            return "p2wsh"
+        return "p2wpkh"
 
     @property
     def hexid(self):
@@ -181,36 +233,77 @@ class Satochip(RAMKeyStore):
                 continue
         
         print('[BootTrace][Satochip] PIN verified successfully')
-        
-        # Get authentikey and set fingerprint (required for signing)
-        # Also derive idkey for wallet file encryption
+
+        # Get authentikey and derive fingerprint + idkey.
+        # Fail fast if this identity step fails; downstream wallet storage relies on idkey.
+        self.show_loader('Reading card info...')
+        self.fingerprint = None
+        self.idkey = None
         try:
-            self.show_loader('Reading card info...')
             authentikey_bytes = self.applet.get_authentikey()
-            if authentikey_bytes and len(authentikey_bytes) > 0:
-                # Compress pubkey for fingerprint calculation
-                if len(authentikey_bytes) == 65:  # Uncompressed
-                    x = authentikey_bytes[1:33]
-                    y_last = authentikey_bytes[64]
-                    prefix = b'\x03' if y_last % 2 else b'\x02'
-                    compressed = prefix + x
-                else:
-                    compressed = authentikey_bytes
-                
-                # hash160 = RIPEMD160(SHA256(data))
-                import hashlib
-                sha256_hash = hashlib.sha256(compressed).digest()
-                ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
-                self.fingerprint = ripemd160[:4]
-                print('[Satochip] Fingerprint set:', self.fingerprint.hex())
-                
-                # Derive idkey from authentikey for wallet file encryption
-                # This ensures the same Satochip card always gets the same idkey
-                from helpers import tagged_hash
-                self.idkey = tagged_hash("satochip idkey", compressed)
-                print('[Satochip] idkey derived from authentikey')
         except Exception as e:
-            print('[Satochip] Failed to get authentikey:', e)
+            print('[BootTrace][Satochip] get_authentikey failed:', e)
+            raise KeyStoreError("Failed to read card authentikey. Please reconnect card and try again.")
+
+        if not authentikey_bytes:
+            print('[BootTrace][Satochip] Empty authentikey response')
+            raise KeyStoreError("Satochip returned empty authentikey")
+
+        # Compress pubkey for fingerprint/idkey derivation
+        if len(authentikey_bytes) == 65:
+            x = authentikey_bytes[1:33]
+            y_last = authentikey_bytes[64]
+            prefix = b'\x03' if y_last % 2 else b'\x02'
+            compressed = prefix + x
+            key_format = "uncompressed"
+        elif len(authentikey_bytes) > 65:
+            # Some applet responses include extra bytes around the uncompressed key.
+            # Keep compatibility with observed 106-byte responses.
+            x = authentikey_bytes[1:33]
+            y_last = authentikey_bytes[64]
+            prefix = b'\x03' if y_last % 2 else b'\x02'
+            compressed = prefix + x
+            key_format = "extended"
+        elif len(authentikey_bytes) == 33:
+            compressed = authentikey_bytes
+            key_format = "compressed"
+        else:
+            print('[BootTrace][Satochip] Unexpected authentikey length:', len(authentikey_bytes))
+            raise KeyStoreError("Unexpected authentikey format from Satochip")
+
+        print('[BootTrace][Satochip] Authentikey format:', key_format)
+
+        # hash160 = RIPEMD160(SHA256(data))
+        try:
+            import hashlib
+            sha256_hash = hashlib.sha256(compressed).digest()
+            ripemd160 = hashlib.new('ripemd160', sha256_hash).digest()
+        except Exception as e:
+            print('[BootTrace][Satochip] Fingerprint derivation failed:', e)
+            raise KeyStoreError("Failed to derive card fingerprint")
+
+        self.fingerprint = ripemd160[:4]
+        print('[BootTrace][Satochip] Fingerprint set:', hexlify(self.fingerprint).decode())
+
+        # Derive idkey from authentikey for wallet file encryption
+        # This ensures the same Satochip card always gets the same idkey
+        try:
+            from helpers import tagged_hash
+            self.idkey = tagged_hash("satochip idkey", compressed)
+        except Exception as e:
+            print('[BootTrace][Satochip] idkey derivation failed:', e)
+            raise KeyStoreError("Failed to derive wallet encryption key from card identity")
+
+        if self.idkey is None:
+            raise KeyStoreError("Failed to initialize wallet encryption key")
+
+        print('[BootTrace][Satochip] idkey derived: True')
+        print('[BootTrace][Satochip] Ready state: connected=%s unlocked=%s fingerprint=%s idkey=%s' % (
+            self.connected,
+            self._pin_unlocked,
+            self.fingerprint is not None,
+            self.idkey is not None,
+        ))
 
     async def get_pin(self, title="Enter your PIN code", subtitle=None, note=None, with_cancel=False):
         """
@@ -286,7 +379,7 @@ class Satochip(RAMKeyStore):
                 props = [
                     "\n#7f8fa4 CARD INFO: #",
                     "Card name: Satochip",
-                    "Fingerprint: %s" % fingerprint.hex(),
+                    "Fingerprint: %s" % hexlify(fingerprint).decode(),
                 ]
             else:
                 props = [
@@ -302,6 +395,46 @@ class Satochip(RAMKeyStore):
     async def load_mnemonic(self):
         """Satochip cannot export the mnemonic - it stays secure on the card."""
         raise KeyStoreError("Satochip cannot export the mnemonic!\nThe seed stays secure on the card.\nUse 'Card info' to see card status.")
+
+    # ========================================
+    # Key ownership - override to avoid root dependency
+    # ========================================
+
+    def owns(self, key):
+        """Check if key belongs to this Satochip card.
+        
+        Since self.root is None, we derive ownership from xpub
+        fetched from the card using get_xpub().
+        """
+        # Check fingerprint first
+        if key.fingerprint is not None and key.fingerprint != self.fingerprint:
+            return False
+        
+        # Get the xpub at the derivation path from the card
+        if key.derivation is None:
+            # Compare against root xpub (path "m")
+            try:
+                our_xpub = self.get_xpub("m")
+                return key.key == our_xpub.key
+            except Exception as e:
+                print('[Satochip] owns() failed to get root xpub:', e)
+                return False
+        
+        # Compare against derived xpub from card
+        try:
+            our_xpub = self.get_xpub(key.derivation)
+            return key.key == our_xpub.key
+        except Exception as e:
+            print('[Satochip] owns() failed to get derived xpub:', e)
+            return False
+
+    def sign_recoverable(self, derivation, msghash: bytes):
+        """Sign with recovery flag - not supported by Satochip.
+        
+        Satochip does not support recoverable signatures.
+        This is used for message signing (BIP-322, SignMessage).
+        """
+        raise KeyStoreError("Satochip does not support recoverable signatures!\nMessage signing is not available.")
 
     # ========================================
     # Signing methods - delegated to Satochip card
@@ -328,11 +461,14 @@ class Satochip(RAMKeyStore):
                 else:
                     path_str += "/" + str(p)
             path = path_str
-        
-        print('[Satochip] get_xpub for path:', path)
-        
+
+        xtype = self._infer_xtype(path)
+        is_mainnet = self._is_mainnet()
+
+        print('[Satochip] get_xpub for path:', path, 'xtype:', xtype, 'network:', self.network)
+
         # Get xpub from card via applet
-        return self.applet.get_xpub(path, xtype='p2wpkh', is_mainnet=True)
+        return self.applet.get_xpub(path, xtype=xtype, is_mainnet=is_mainnet)
     
     def sign_hash(self, derivation, msghash: bytes):
         """Sign a 32-byte hash with key at derivation path.
@@ -369,7 +505,7 @@ class Satochip(RAMKeyStore):
         # Now sign the hash with keynbr=0xFF (BIP32 current path)
         der_sig = self.applet.sign_transaction_hash(0xFF, msghash)
         
-        print('[Satochip] Signature:', der_sig.hex())
+        print('[Satochip] Signature:', hexlify(der_sig).decode())
         return der_sig
     
     def sign_psbt(self, psbt, sighash=SIGHASH.ALL):

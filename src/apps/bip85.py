@@ -64,6 +64,18 @@ class App(BaseApp):
     name = "bip85"
 
     async def menu(self, show_screen):
+        # Check if keystore supports BIP-85 (requires root key access)
+        if hasattr(self.keystore, 'can_export_seed') and not self.keystore.can_export_seed:
+            from gui.screens import Alert
+            await show_screen(Alert(
+                "Not available",
+                "BIP-85 derivation requires access\nto the master seed.\n\n"
+                "Hardware wallets like Satochip keep\n"
+                "the seed secure on the card and\n"
+                "cannot derive new keys."
+            ))
+            return False
+
         buttons = [
             (None, "Mnemonics"),
             (0, "12-word mnemonic"),

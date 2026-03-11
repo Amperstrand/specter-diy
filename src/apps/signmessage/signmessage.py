@@ -20,6 +20,13 @@ class MessageApp(BaseApp):
     prefixes = [b"signmessage"]
     name = "message"
 
+    def init(self, keystore, network, show_loader, communicate):
+        super().init(keystore, network, show_loader, communicate)
+        if getattr(self.keystore, "NAME", "") == "Satochip":
+            self.prefixes = []
+        else:
+            self.prefixes = [b"signmessage"]
+
     async def process_host_command(self, stream, show_screen):
         """
         If command with one of the prefixes is received
@@ -28,6 +35,9 @@ class MessageApp(BaseApp):
         - stream (file, BytesIO etc)
         - meta object with title and note
         """
+        if getattr(self.keystore, "NAME", "") == "Satochip":
+            raise AppError("Message signing is not available for Satochip")
+
         # reads prefix from the stream (until first space)
         prefix = self.get_prefix(stream)
         if prefix != b"signmessage":

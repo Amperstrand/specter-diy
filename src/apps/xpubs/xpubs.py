@@ -28,6 +28,9 @@ class XpubApp(BaseApp):
         self.account = 0
         pass
 
+    def _supports_taproot(self):
+        return bool(getattr(self.keystore, "supports_taproot", True))
+
     async def menu(self, show_screen, show_all=False):
         net = NETWORKS[self.network]
         coin = net["bip32"]
@@ -56,10 +59,6 @@ class XpubApp(BaseApp):
                 ),
                 (None, "Other keys"),
                 (
-                    "m/86h/%dh/%dh" % (coin, self.account),
-                    "Single Taproot\nm/86h/%dh/%dh" % (coin, self.account)
-                ),
-                (
                     "m/49h/%dh/%dh" % (coin, self.account),
                     "Single Nested Segwit\nm/49h/%dh/%dh" % (coin, self.account)
                 ),
@@ -68,6 +67,14 @@ class XpubApp(BaseApp):
                     "Multisig Nested Segwit\nm/48h/%dh/%dh/1h" % (coin, self.account),
                 ),
             ]
+            if self._supports_taproot():
+                buttons.insert(
+                    4,
+                    (
+                        "m/86h/%dh/%dh" % (coin, self.account),
+                        "Single Taproot\nm/86h/%dh/%dh" % (coin, self.account),
+                    ),
+                )
         # wait for menu selection
         menuitem = await show_screen(
             Menu(
@@ -210,12 +217,13 @@ class XpubApp(BaseApp):
         coin = NETWORKS[self.network]["bip32"]
         derivations = [
             ('bip84', "p2wpkh", "m/84'/%d'/%d'" % (coin, account)),
-            ('bip86', "p2tr", "m/86'/%d'/%d'" % (coin, account)),
             ('bip49', "p2sh-p2wpkh", "m/49'/%d'/%d'" % (coin, account)),
             ('bip44', "p2pkh", "m/44'/%d'/%d'" % (coin, account)),
             ('bip48_1', "p2sh-p2wsh", "m/48'/%d'/%d'/1'" % (coin, account)),
             ('bip48_2', "p2wsh", "m/48'/%d'/%d'/2'" % (coin, account)),
         ]
+        if self._supports_taproot():
+            derivations.insert(1, ('bip86', "p2tr", "m/86'/%d'/%d'" % (coin, account)))
         fingerprint = hexlify(self.keystore.fingerprint).decode()
 
         if file_format == self.export_specter_diy:
@@ -315,9 +323,10 @@ class XpubApp(BaseApp):
             "zpub": ("wpkh(%s%s/{0,1}/*)" % (prefix, xpub), "Native Segwit"),
             "ypub": ("sh(wpkh(%s%s/{0,1}/*))" % (prefix, xpub), "Nested Segwit"),
             "legacy": ("pkh(%s%s/{0,1}/*)" % (prefix, xpub), "Legacy"),
-            "taproot": ("tr(%s%s/{0,1}/*)" % (prefix, xpub), "Taproot"),
             # multisig is not supported yet - requires cosigners app
         })
+        if self._supports_taproot():
+            descriptors["taproot"] = ("tr(%s%s/{0,1}/*)" % (prefix, xpub), "Taproot")
 
         if version == net["ypub"]:
             buttons = [
@@ -331,7 +340,7 @@ class XpubApp(BaseApp):
                 descriptors.pop("zpub"),
                 (None, "Other"),
             ]
-        elif "/86h/" in derivation:
+        elif "/86h/" in derivation and self._supports_taproot():
             buttons = [
                 (None, "Recommended"),
                 descriptors.pop("taproot"),
