@@ -372,7 +372,53 @@ class SeedKeeper(JavaCardKeyStore):
                 props.extend([
                     "\n#7f8fa4 STORAGE INFO #",
                     "Status: Unable to read",
-                ])
+            ])
+            
+            # List all secrets by type for debugging
+            try:
+                headers = self.applet.list_secret_headers()
+                secret_types = {}
+                for h in headers:
+                    t = h['type']
+                    if t not in secret_types:
+                        secret_types[t] = []
+                    secret_types[t].append(h)
+                
+                if secret_types:
+                    props.append("\n#7f8fa4 SECRETS BY TYPE: #")
+                    # Map type codes to names
+                    type_names = {
+                        0x10: "Masterseed",
+                        0x30: "BIP39",
+                        0x31: "BIP39 v2",
+                        0x40: "Electrum",
+                        0x50: "Shamir",
+                        0x60: "PrivKey",
+                        0x70: "PubKey",
+                        0x80: "SymKey",
+                        0x90: "Password",
+                        0xB0: "2FA",
+                        0xC0: "Data",
+                        0xC1: "Descriptor",
+                    }
+                    for t, secrets in sorted(secret_types.items()):
+                        type_name = type_names.get(t, "0x%02X" % t)
+                        props.append("%s: %d" % (type_name, len(secrets)))
+                        
+                    # Show descriptor contents as debug text
+                    if 0xC1 in secret_types:
+                        descriptors = self.applet.get_descriptor_secrets()
+                        if descriptors:
+                            props.append("\n#7f8fa4 DESCRIPTORS (debug): #")
+                            for d in descriptors[:3]:  # Limit to 3 to avoid overflow
+                                label = d.get('label', 'No label')
+                                desc = d.get('descriptor', '')
+                                # Truncate long descriptors
+                                if len(desc) > 60:
+                                    desc = desc[:57] + "..."
+                                props.append("[%s] %s" % (label, desc))
+            except Exception as e:
+                print('[SeedKeeper] Failed to list secrets:', e)
             
             scr = Alert("SeedKeeper info", "\n\n".join(props))
             scr.message.set_recolor(True)
