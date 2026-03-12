@@ -22,11 +22,64 @@ class SeedKeeperApplet(SecureAppletBase):
     INS_LIST_SECRETS = 0xA6
     INS_GET_STATUS = 0xA7
 
-    # Secret types
-    SECRET_TYPE_MASTERSEED = 0x10
-    SECRET_TYPE_BIP39 = 0x30
-    SECRET_TYPE_BIP39_V2 = 0x31
-
+    # =============================================================================
+    # SeedKeeper Secret Types
+    # =============================================================================
+    # SeedKeeper stores secrets in a dictionary indexed by secret ID. Each secret
+    # has a type code that determines its format and use case.
+    #
+    # MASTERSEED (0x10) - BIP32 master seed with full wallet metadata:
+    #   This is a comprehensive secret type that bundles everything needed for
+    #   wallet recovery in one atomic object:
+    #   - 64-byte BIP32 master seed (derived from mnemonic via PBKDF2)
+    #   - BIP39 entropy bytes (original random bytes before PBKDF2)
+    #   - Wordlist index (English=0, etc.)
+    #   - Optional passphrase
+    #   - Optional wallet descriptor
+    #
+    #   WARNING: The masterseed contains the DERIVED seed, not just entropy.
+    #   If you only have the masterseed without the entropy, you cannot recover
+    #   the original mnemonic words. The entropy field is optional in some
+    #   implementations. This type is powerful but requires careful handling.
+    #
+    #   Format: [seed_len(1)][seed][wordlist(1)][entropy_len(1)][entropy][pass_len(1)][passphrase][desc_len(2)][descriptor]
+    #
+    # BIP39_MNEMONIC (0x30) - Raw BIP39 entropy:
+    #   Stores only the original entropy bytes (16-32 bytes) that can be
+    #   converted to mnemonic words. This is the safest format for backup
+    #   because the entropy directly maps to the 12/24 recovery words.
+    #
+    #   Format: [entropy_len(2)][entropy][pass_len(2)][passphrase]
+    #
+    # BIP39_MNEMONIC_V2 (0x31) - Enhanced BIP39 format:
+    #   Same as 0x30 but with additional metadata fields in newer applet versions.
+    #   Parsing is identical to 0x30 for entropy extraction.
+    #
+    # ELECTRUM_MNEMONIC (0x40) - Electrum-specific seed format:
+    #   Not currently supported. Electrum uses a different seed derivation
+    #   (versioned mnemonics with optional seed_type prefix).
+    #
+    # WALLET_DESCRIPTOR (0xC1) - Bitcoin output descriptor:
+    #   Stores a wallet descriptor string (e.g., "wsh(sortedmulti(2,[fp]xpub...,[fp]xpub...))").
+    #   Used for multisig wallet configuration backup. Displayed as debug text.
+    #
+    #   Format: [size(2)][descriptor_string]
+    #
+    # Other types (not currently supported):
+    #   0x50 - Shamir Secret Share (SLIP-39)
+    #   0x60 - Private Key (raw ECC/RSA)
+    #   0x70 - Public Key
+    #   0x80 - Symmetric Key (AES/HMAC)
+    #   0x90 - Password (password manager entries)
+    #   0xB0 - 2FA Secret (TOTP/HOTP)
+    #   0xC0 - Generic Data (arbitrary bytes)
+    # =============================================================================
+    
+    SECRET_TYPE_MASTERSEED = 0x10      # BIP32 master seed + metadata (see above)
+    SECRET_TYPE_BIP39 = 0x30           # BIP39 entropy bytes
+    SECRET_TYPE_BIP39_V2 = 0x31        # BIP39 entropy bytes (v2 format)
+    SECRET_TYPE_ELECTRUM = 0x40        # Electrum mnemonic (not supported)
+    SECRET_TYPE_DESCRIPTOR = 0xC1      # Wallet output descriptor
     def __init__(self, connection):
         """Initialize with card connection."""
         super().__init__(connection, self.AID)
@@ -394,3 +447,36 @@ class SeedKeeperApplet(SecureAppletBase):
                 return mnemonic
 
         raise AppletException("Invalid BIP39 secret format")
+
+    def get_descriptor_secrets(self):
+        """Find and export all wallet descriptor secrets (type 0xC1).
+        
+        Wallet descriptors are Bitcoin output descriptors that describe
+        multisig wallet configurations. They are stored as text strings.
+        
+        Returns: list of dicts with 'id', 'label', 'descriptor' keys
+        """
+        print("[SeedKeeper] Searching for descriptor secrets...")
+        headers = self.list_secret_headers()
+        
+        descriptors = []
+        for h in headers:
+            if h['type'] == self.SECRET_TYPE_DESCRIPTOR:
+                print("[SeedKeeper] Found descriptor secret id:", h['id'], "label:", h['label'])
+                try:
+                    secret_data = self.export_secret(h['id'])
+                    # Descriptor format: [size(2)][descriptor_string]
+                    if len(secret_data) >= 2:
+                        desc_len = (secret_data[0] << 8) | secret_data[1]
+                        descriptor_str = secret_data[2:2 + desc_len].decode('utf-8', errors='replace')
+                        descriptors.append({
+                            'id': h['id'],
+                            'label': h['label'],
+                            'descriptor': descriptor_str
+                        })
+                        print("[SeedKeeper] Descriptor:", descriptor_str[:50] + "..." if len(descriptor_str) > 50 else descriptor_str)
+                except Exception as e:
+                    print("[SeedKeeper] Failed to export descriptor", h['id'], ":", e)
+        
+        print("[SeedKeeper] Found %d descriptor secrets" % len(descriptors))
+        return descriptors

@@ -220,7 +220,20 @@ class Satochip(JavaCardKeyStore):
             self.fingerprint is not None,
             self.idkey is not None,
         ))
-
+        
+        # Show authentikey confirmation after successful PIN entry
+        # This helps users verify they're using the correct card
+        try:
+            await self.show(Alert(
+                "Card unlocked",
+                "Fingerprint: %s\n\nAuthentikey:\n%s" % (
+                    hexlify(self.fingerprint).decode(),
+                    hexlify(compressed).decode()
+                ),
+                button_text="Continue"
+            ))
+        except Exception as e:
+            print('[BootTrace][Satochip] Failed to show authentikey confirmation:', e)
     async def init(self, show_fn, show_loader):
         """Initialize Satochip - generates in-memory secret for settings.
         
@@ -318,13 +331,32 @@ class Satochip(JavaCardKeyStore):
                     props.append("Fingerprint: %s" % hexlify(fingerprint).decode())
                     props.append("Seed initialized: Yes")
                     props.append("PIN attempts left: %s" % pin_attempts)
+                    
+                    # Display Authentikey (compressed pubkey for readability)
+                    # The authentikey is the card's unique public key used for:
+                    # - Card identification (fingerprint derived from it)
+                    # - Secure channel key agreement
+                    # - Encrypting secrets for "secure import" from SeedKeeper
+                    if len(authentikey_bytes) == 65:
+                        # Uncompressed (04 || x || y) -> compressed (02/03 || x)
+                        prefix = b'\x02' if authentikey_bytes[64] % 2 == 0 else b'\x03'
+                        compressed = prefix + authentikey_bytes[1:33]
+                        props.append("\n#7f8fa4 AUTHENTIKEY: #")
+                        props.append(hexlify(compressed).decode())
+                    elif len(authentikey_bytes) == 33:
+                        # Already compressed
+                        props.append("\n#7f8fa4 AUTHENTIKEY: #")
+                        props.append(hexlify(authentikey_bytes).decode())
+                    else:
+                        # Unknown format - show raw bytes
+                        props.append("\n#7f8fa4 AUTHENTIKEY (raw): #")
+                        props.append(hexlify(authentikey_bytes[:33]).decode())
                 else:
                     props.append("Seed initialized: No")
                     props.append("PIN attempts left: %s" % pin_attempts)
             except Exception as e:
                 print('[Satochip] Failed to get authentikey:', e)
                 props.append("Seed status: Unknown")
-            
             scr = Alert("Satochip info", "\n\n".join(props))
             scr.message.set_recolor(True)
             await self.show(scr)
