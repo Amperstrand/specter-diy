@@ -25,6 +25,7 @@ Responses:
 
 import sys
 import os
+import platform
 from binascii import hexlify, unhexlify
 
 
@@ -32,6 +33,18 @@ class TestMode:
     def __init__(self, specter_ref=None):
         self.specter = specter_ref  # Reference to Specter instance
         self.running = False
+        self._current_source = 'stdin'  # Track command source for response routing
+        
+        # Initialize UART3 VCP for HIL testing on hardware only
+        # UART3 uses PB10 (TX) / PB11 (RX) - ST-Link Virtual COM Port
+        # NOT the debug UART (platform.py stlk = pyb.UART("YB", 9600))
+        self.uart = None
+        if not platform.simulator:
+            try:
+                import pyb
+                self.uart = pyb.UART(3, 115200)
+            except Exception as e:
+                print("[TestMode] UART3 init failed:", e)
         
     def find_javacard_keystore(self):
         """Find any JavaCard keystore instance from active Specter.
@@ -85,6 +98,7 @@ class TestMode:
                         if char:
                             if char == '\n' or char == '\r':
                                 if buffer.strip().startswith('TEST_'):
+                                    self._current_source = 'stdin'
                                     await self._process_command(buffer.strip())
                                 buffer = ""
                             else:
@@ -95,6 +109,18 @@ class TestMode:
                 except Exception as e:
                     print("[TestMode] Poll error:", e)
                     await asyncio.sleep_ms(100)
+                
+                # Poll UART3 VCP for HIL testing (hardware only)
+                if not platform.simulator and self.uart and self.uart.any():
+                    try:
+                        line = self.uart.readline()
+                        if line:
+                            cmd_str = line.decode().strip()
+                            if cmd_str.startswith('TEST_'):
+                                self._current_source = 'uart'
+                                await self._process_command(cmd_str)
+                    except Exception as e:
+                        print("[TestMode] UART error:", e)
                         
             except Exception as e:
                 print("[TestMode] Error in command loop:", e)
@@ -149,9 +175,26 @@ class TestMode:
         except Exception as e:
             self._respond("ERROR:" + str(e))
     
-    def _respond(self, msg):
-        """Send response."""
-        print("[TestMode] RESP:", msg)
+    def _respond(self, msg, source=None):
+        """Send response to the appropriate transport.
+        
+        Args:
+            msg: Response message to send
+            source: 'stdin' or 'uart' - if None, uses _current_source
+        """
+        actual_source = source if source is not None else self._current_source
+        
+        if actual_source == 'uart' and self.uart is not None:
+            # Route to UART3 VCP
+            try:
+                self.uart.write((msg + '\n').encode())
+            except Exception as e:
+                print("[TestMode] UART write error:", e)
+                # Fallback to print
+                print("[TestMode] RESP:", msg)
+        else:
+            # Route to stdout (stdin source or fallback)
+            print("[TestMode] RESP:", msg)
     
     async def _cmd_status(self):
         """Get current status."""
