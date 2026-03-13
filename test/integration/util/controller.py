@@ -1,6 +1,8 @@
 import shutil
 import json
 import time
+from util.base_controller import BaseController
+
 import socket
 import subprocess
 import os
@@ -38,7 +40,7 @@ class TCPSocket:
     def receive(self):
         return self.readline()
 
-class SimController:
+class SimController(BaseController):
     def __init__(self):
         self.started = False
         self.gui = None
@@ -89,9 +91,9 @@ class SimController:
         assert res == b"ACK\r\n"
         # if we need to confirm anything
         for command in commands:
-            sim.gui.send(command)
+            self.gui.send(command)
             time.sleep(0.3)
-        res = sim.usb.receive()
+        res = self.usb.receive()
         return res.strip()
 
 class BitcoinCore:
