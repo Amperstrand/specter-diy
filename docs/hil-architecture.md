@@ -696,7 +696,7 @@ python -c "from util.hardware_controller import HardwareController; c = Hardware
 
 | Task | Dependencies | Deliverable |
 |------|--------------|-------------|
-| Create BaseController interface | None | Abstract class in `util/base_controller.py` |
+| Create BaseController interface | None | Abstract class in `test/integration/util/base_controller.py` |
 | Refactor SimController | BaseController | Inherits from BaseController |
 | Add test parametrization | BaseController | Tests run with `--hardware` flag |
 | Handle GUI command differences | TestMode | TEST_UI_SET replaces GUI socket |
@@ -942,4 +942,30 @@ screen /dev/ttyACM0 115200
 
 # Or with pyserial
 python -c "import serial; s=serial.Serial('/dev/ttyACM0', 115200); ..."
-```
+
+## Current Status (Task 11)
+
+### File Path Verification
+
+| File Path | Status | Notes |
+|-----------|--------|-------|
+| src/gui/tcp_gui.py | ✓ Implemented | TCP GUI for simulator |
+| src/hosts/usb.py | ✓ Implemented | USB host communication |
+| src/platform.py | ✓ Implemented | Platform abstraction |
+| src/test_mode.py | ✓ Implemented | TestMode command loop |
+| test/integration/tests/test_basic.py | ✓ Implemented | Basic integration tests |
+| test/integration/util/controller.py | ✓ Implemented | SimController with TCPSocket |
+| test/integration/util/hardware_controller.py | ✓ Implemented | HardwareController (new) |
+| test/integration/util/base_controller.py | ✗ Path Fixed | Was referenced as util/base_controller.py (incorrect) |
+| test/integration/tests/test_smartcard.py | ✗ Not Implemented | Smart card tests pending |
+
+### Issues Found
+
+1. **Incorrect file path**: `util/base_controller.py` should be `test/integration/util/base_controller.py`
+2. **Missing implementation**: `test/integration/tests/test_smartcard.py` was not created (mentioned in Phase 4 of migration path)
+
+### Next Steps
+
+- Update file path reference in documentation
+- Create test_smartcard.py if Phase 4 of migration path is to be completed
+- Verify all file paths match implementation in Tasks 2-9
