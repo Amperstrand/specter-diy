@@ -99,3 +99,12 @@ clean:
 		FROZEN_MANIFEST=$(FROZEN_MANIFEST_DISCO) clean
 
 .PHONY: all clean git-info
+
+# Test runner targets
+PORT ?= /dev/ttyACM0
+test-hil: unix
+	cd test && ../$(TARGET_DIR)/micropython_unix run_tests.py --hardware --port $(PORT)
+
+test-hil-flash: unix
+	cd test && ../$(TARGET_DIR)/micropython_unix run_tests.py --hardware --port $(PORT) --flash $(FLASH)
+	@echo 'Usage: make test-hil FLASH=path/to/firmware.bin'
