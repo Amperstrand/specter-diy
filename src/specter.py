@@ -27,6 +27,8 @@ from gui.screens.mnemonic import MnemonicPrompt
 # small helper functions
 from helpers import gen_mnemonic, fix_mnemonic
 from errors import BaseError
+from gui.screens.debug_info import DebugInfoScreen
+from debug_trace import log, log_exception
 
 
 class SpecterError(BaseError):
@@ -147,6 +149,7 @@ class Specter:
             print(e)
             b = BytesIO()
             sys.print_exception(e, b)
+            log_exception("Specter", e)
             errmsg = "Something unexpected happened...\n\n"
             errmsg += b.getvalue().decode()
             await self.gui.error(errmsg)
@@ -154,21 +157,74 @@ class Specter:
             return next_fn
 
     async def select_keystore(self):
-        # if we have fixed keystore - just use it
+        """
+        Detect and select an available keystore.
+        
+        In multi-keystore mode, displays a debug info screen showing:
+        - Firmware version and git commit
+        - Smartcard presence status
+        - Detected applets (SeedKeeper, MemoryCard)
+        - Card connection status
+        
+        Polls all registered keystores' is_available() methods until one responds.
+        Refreshes debug screen every KEYSTORE_POLL_INTERVAL seconds.
+        
+        Sets self.keystore to the first available keystore instance.
+        """
+        # Polling interval for keystore detection (seconds)
+        KEYSTORE_POLL_INTERVAL = 0.5
+        
+        def _debug(msg):
+            """Log debug message with Specter context."""
+        
+        _debug("select_keystore: starting detection...")
+        _debug("select_keystore: starting detection...")
+        _debug("Keystores to check: " + str([k.NAME for k in self.keystores]))
+        
         if len(self.keystores) == 1:
+            _debug("Single keystore mode: " + self.keystores[0].NAME)
             self.keystore = self.keystores[0]()
             return
-        # checking the first available keystore
+        
+        # Show debug info screen during keystore detection
+        debug_screen = DebugInfoScreen()
+        debug_screen.load()
+        
+        # Get connection from first card-based keystore for card scanning
+        connection = None
+        for ks in self.keystores:
+            if hasattr(ks, 'connection'):
+                connection = ks.connection
+                break
+        
+        # Import card scanner lazily to avoid circular imports
+        from keystore.javacard.card_scanner import scan_card_applets
+        
         keystore_cls = None
-        # TODO: show some screen here if none are available
         while keystore_cls is None:
+            # Update debug screen with card info
+            if connection:
+                try:
+                    info = scan_card_applets(connection)
+                    debug_screen.update_info(info)
+                except Exception as e:
+                    _debug("Card scan error: " + str(e))
+                    debug_screen.update_info({"card_present": False, "applets": [], "status": "Error: " + str(e)})
+            
             for keystore in self.keystores:
+                _debug("Checking: " + keystore.NAME)
                 if keystore.is_available():
                     keystore_cls = keystore
+                    _debug("Found available: " + keystore.NAME)
                     break
-            # if none are available just wait for it
-            # if keystore_cls is None:
-            #     await asyncio.sleep_ms(50)
+                else:
+                    _debug("Not available: " + keystore.NAME)
+            
+            # If no keystore found, wait a bit before retrying
+            if keystore_cls is None:
+                await asyncio.sleep(KEYSTORE_POLL_INTERVAL)
+        
+        _debug("Selected keystore: " + keystore_cls.NAME)
         self.keystore = keystore_cls()
 
     async def setup(self):
@@ -198,6 +254,7 @@ class Specter:
         except:
             b = BytesIO()
             sys.print_exception(e, b)
+            log_exception("SpecterHost", e)
             msg = b.getvalue().decode()
         await self.gui.error(msg, popup=True)
 

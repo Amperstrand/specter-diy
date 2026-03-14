@@ -8,6 +8,10 @@ import platform
 from helpers import tagged_hash
 from gui.screens import Alert, Progress, Menu
 import asyncio
+from debug_trace import log, log_exception
+
+def _debug(msg):
+    log("SeedKeeper", msg)
 
 
 class SeedKeeper(RAMKeyStore):
@@ -41,23 +45,38 @@ class SeedKeeper(RAMKeyStore):
 
     @classmethod
     def is_available(cls):
-        """Check if SeedKeeper card is available and responsive."""
-        if not cls.connection.isCardInserted():
+        _debug("Checking availability...")
+        
+        inserted = cls.connection.isCardInserted()
+        _debug("Card inserted: " + str(inserted))
+        if not inserted:
+            _debug("-> NOT AVAILABLE (no card)")
             return False
+        
         try:
+            _debug("Connecting T=1...")
             cls.connection.connect(cls.connection.T1_protocol)
+            _debug("T=1 connected")
+            
             applet = SeedKeeperApplet(cls.connection)
+            _debug("Selecting applet...")
             applet.select()
-            # get_card_status() does NOT require secure channel
+            _debug("Applet selected")
+            
+            _debug("Getting card status...")
             applet.get_card_status()
+            _debug("Card status OK")
+            
             cls.connection.disconnect()
+            _debug("-> AVAILABLE")
             return True
         except Exception as e:
-            print(e)
+            _debug("Exception: " + str(e))
             try:
                 cls.connection.disconnect()
             except:
                 pass
+            _debug("-> NOT AVAILABLE (exception)")
             return False
 
     @property
@@ -85,6 +104,11 @@ class SeedKeeper(RAMKeyStore):
     def is_locked(self):
         """Returns True if PIN has not been verified yet."""
         return not self._pin_unlocked
+
+    @property
+    def pin_subtitle(self):
+        """Custom subtitle for PIN screen."""
+        return "SeedKeeper card detected"
 
     @property
     def is_ready(self):
@@ -179,6 +203,18 @@ class SeedKeeper(RAMKeyStore):
         # the rest can be done with parent
         await super().init(show_fn, show_loader)
 
+    async def get_pin(self, title="Enter your PIN code", with_cancel=False, note=None):
+        """Override to support custom note parameter."""
+        from gui.screens import PinScreen
+        scr = PinScreen(
+            title=title,
+            note=note if note else "Do you recognize these words?",
+            get_word=self.get_auth_word,
+            subtitle=self.pin_subtitle,
+            with_cancel=with_cancel
+        )
+        return await self.show(scr)
+
     async def unlock(self):
         """Override: prompt for PIN via touchscreen, then auto-load mnemonic."""
         # Establish secure channel before PIN verification
@@ -193,10 +229,7 @@ class SeedKeeper(RAMKeyStore):
             if pin_attempts is not None:
                 note = "%d PIN attempts remaining" % pin_attempts
 
-            pin = await self.get_pin(
-                subtitle="SeedKeeper card detected",
-                note=note,
-            )
+            pin = await self.get_pin(note=note)
             self.show_loader('Verifying PIN code...')
             try:
                 self._unlock(pin)
@@ -210,6 +243,7 @@ class SeedKeeper(RAMKeyStore):
         # Multi-secret support: list and select BIP39-capable secrets
         try:
             headers = self.applet.list_secret_headers()
+            _debug("Raw headers: %s" % headers)
             bip39_headers = [
                 h for h in headers
                 if h['type'] in (0x10, 0x30, 0x31)
@@ -225,9 +259,24 @@ class SeedKeeper(RAMKeyStore):
                 selected = bip39_headers[0]
             else:
                 # Show menu for multi-secret selection
-                buttons = [(h['id'], h['label'] if h['label'] else 'Secret #%d' % h['id']) for h in bip39_headers]
-                selected_id = await self.show(Menu(buttons, title='Select secret'))
-                selected = next(h for h in bip39_headers if h['id'] == selected_id)
+                buttons = []
+                for h in bip39_headers:
+                    label = h.get('label')
+                    if not isinstance(label, str) or len(label) == 0:
+                        label = 'Secret #%d' % h['id']
+                    buttons.append((h['id'], label))
+                _debug("Secret choice buttons: %s" % buttons)
+                selected_id = await self.show(Menu(buttons, title='Select secret', last=(255, None)))
+                _debug("Selected menu id: %s" % selected_id)
+                if selected_id == 255:
+                    raise KeyStoreError("Secret selection cancelled")
+                selected = None
+                for h in bip39_headers:
+                    if h['id'] == selected_id:
+                        selected = h
+                        break
+                if selected is None:
+                    raise KeyStoreError("Invalid secret id selected: %s" % selected_id)
 
             self.selected_secret_id = selected['id']
             print('[SeedKeeper] Selected secret id:', selected['id'])
@@ -240,7 +289,11 @@ class SeedKeeper(RAMKeyStore):
             print('[SeedKeeper] Mnemonic loaded successfully')
 
         except AppletException as e:
+            log_exception("SeedKeeper", e)
             await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+        except Exception as e:
+            log_exception("SeedKeeper", e)
+            await self.show(Alert('Error', 'SeedKeeper unlock failed:\n%s' % str(e)))
 
     async def load_mnemonic(self):
         """Load mnemonic from SeedKeeper card."""
@@ -275,7 +328,12 @@ class SeedKeeper(RAMKeyStore):
             return True
 
         except AppletException as e:
+            log_exception("SeedKeeper", e)
             await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+            return False
+        except Exception as e:
+            log_exception("SeedKeeper", e)
+            await self.show(Alert('Error', 'SeedKeeper load failed:\n%s' % str(e)))
             return False
 
     async def save_mnemonic(self):

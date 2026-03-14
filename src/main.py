@@ -12,6 +12,7 @@ import platform
 from helpers import load_apps
 from app import BaseApp
 import display
+from debug_trace import log_exception
 
 def main(apps=None, network="main", keystore_cls=None):
     """
@@ -81,4 +82,8 @@ def main(apps=None, network="main", keystore_cls=None):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        log_exception("main", e)
+        raise

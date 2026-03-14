@@ -12,6 +12,10 @@ import asyncio
 from io import BytesIO
 from binascii import hexlify
 import lvgl as lv
+from debug_trace import log
+
+def _debug(msg):
+    log("MemoryCard", msg)
 
 
 class MemoryCard(RAMKeyStore):
@@ -49,17 +53,36 @@ In this mode device can only operate when the smartcard is inserted!"""
 
     @classmethod
     def is_available(cls):
-        if not cls.connection.isCardInserted():
+        _debug("Checking availability...")
+        
+        inserted = cls.connection.isCardInserted()
+        _debug("Card inserted: " + str(inserted))
+        if not inserted:
+            _debug("-> NOT AVAILABLE (no card)")
             return False
         try:
+            _debug("Connecting T=1...")
             cls.connection.connect(cls.connection.T1_protocol)
+            _debug("T=1 connected")
+            
             applet = MemoryCardApplet(cls.connection)
+            _debug("Selecting applet...")
             applet.select()
+            _debug("Opening secure channel...")
             applet.open_secure_channel()
+            _debug("Secure channel opened")
+            
             cls.connection.disconnect()
+            _debug("-> AVAILABLE")
             return True
         except Exception as e:
-            print(e)
+            _debug("Exception: " + str(e))
+            try:
+                cls.connection.disconnect()
+            except:
+                pass
+            _debug("-> NOT AVAILABLE (exception)")
+            return False
             return False
 
 
