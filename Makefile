@@ -98,4 +98,34 @@ clean:
 		USER_C_MODULES=$(USER_C_MODULES) \
 		FROZEN_MANIFEST=$(FROZEN_MANIFEST_DISCO) clean
 
-.PHONY: all clean git-info
+# Code quality targets
+lint:
+	@echo "Running flake8..."
+	flake8 src/ test/ --count --select=E9,F63,F7,F82 --show-source --statistics
+	flake8 src/ test/ --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
+format:
+	@echo "Running black..."
+	black src/ test/ --check --diff || true
+	@echo "Running isort..."
+	isort src/ test/ --check --diff || true
+
+format-fix:
+	@echo "Fixing formatting..."
+	black src/ test/
+	isort src/ test/
+
+typecheck:
+	@echo "Running mypy..."
+	mypy src/ --ignore-missing-imports || true
+.PHONY: all clean git-info lint format format-fix typecheck
+
+# Coverage measurement
+coverage:
+	@echo "Running coverage..."
+	coverage run -m unittest discover -s test/tests -p 'test_*.py' 2>/dev/null || true
+	coverage report --include='src/*' --omit='src/gui/*,src/hosts/*' 2>/dev/null || true
+	coverage xml -o coverage.xml 2>/dev/null || true
+	@echo "Coverage report generated: coverage.xml"
+
+.PHONY: all clean git-info lint format format-fix typecheck coverage

@@ -132,6 +132,30 @@ also creates `release/disco-nobootloader.{bin,hex}`, which contain the plain fir
 `disco-nobootloader.bin` image is identical to the `nix build` output and can be flashed directly to a development board when
 you need a faster iteration loop.
 
+### Fast unsigned bootloader dev cycle (Docker)
+
+For hardware debugging, use the bootloader-based dev flow with unsigned upgrades. This keeps secure boot layout (`USE_DBOOT=1`)
+while avoiding signature overhead during rapid testing.
+
+```sh
+# one-time setup bundle (build firmware + debug bootloader + initial image)
+./build_firmware.sh devboot-init
+
+# flash this once on a clean board
+release/initial_firmware_devboot_unsigned.bin
+
+# iterative loop for each change (Docker build + unsigned upgrade)
+./build_firmware.sh devboot-upgrade devboot-check
+```
+
+Expected artifacts:
+
+- `release/initial_firmware_devboot_unsigned.bin`
+- `release/specter_upgrade_dev_unsigned.bin`
+
+`devboot-check` verifies that the generated firmware/upgrade stays DBOOT-compatible (main payload base address `0x08020000`),
+targets `stm32f469disco`, and contains the expected main section before you copy the file to SD card for reboot-based testing.
+
 ## Run Unittests
 
 Currently unittests work only on linuxport, and there are... not many... Contributions are very welcome!
