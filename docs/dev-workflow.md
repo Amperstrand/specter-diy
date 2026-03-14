@@ -11,16 +11,21 @@ For development, we use **unlocked firmware** with:
 
 ## Quick Start
 
-### Option A: Firmware Without Bootloader (Fastest)
+### Option A: Firmware Without Bootloader (Fastest) - RECOMMENDED
 
 Direct flash without secure bootloader - best for rapid iteration:
 
 ```sh
-# Build
-./build_firmware.sh nobootloader
+# On remote build machine (Ubuntu with Docker)
+cd ~/specter-build
+sudo docker run --rm -v $(pwd):/workspace -w /workspace specter24d make disco
 
-# Flash
-st-flash --reset write release/disco-nobootloader.bin 0x08000000
+# Copy to local machine
+scp ubuntu@192.168.13.246:~/specter-build/bin/specter-diy.bin release/firmware.bin
+
+# Flash on local machine (or on remote if device is connected there)
+st-flash --reset erase
+st-flash --reset write release/firmware.bin 0x08000000
 ```
 
 ### Option B: Bootloader + Unsigned Upgrades
@@ -78,10 +83,17 @@ openocd -f openocd.cfg -c "program release/disco-nobootloader.bin 0x08000000 res
 
 ### Serial Console
 
-The firmware outputs debug messages via USB CDC:
+**Important:** The F469DISC board has TWO USB ports:
+
+1. **ST-LINK USB** (mini-USB) - Used for flashing and debugging via ST-LINK
+2. **User USB OTG** (micro-USB) - Used by firmware for USB CDC communication
+
+The firmware uses the **User USB port** for MicroPython REPL and host communication.
+The ST-LINK VCP (`/dev/ttyACM0` from ST-LINK) is separate from the firmware's USB.
 
 ```sh
-# Connect to ST-LINK VCP or MicroPython USB
+# Connect USER USB cable (micro-USB on board) for firmware communication
+# This should create /dev/ttyACM0 or /dev/ttyACM1
 screen /dev/ttyACM0 115200
 
 # Or with minicom
