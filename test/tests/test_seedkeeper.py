@@ -104,6 +104,7 @@ class SeedKeeperImportTest(TestCase):
         # AID should be ASCII "SeedKeeper"
         expected_aid = b'SeedKeeper'
         self.assertEqual(SeedKeeperApplet.AID, expected_aid,
+                        "AID should be {!r}".format(expected_aid))
                         f"AID should be {expected_aid!r}")
 
 
