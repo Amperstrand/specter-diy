@@ -1,0 +1,168 @@
+=============================================================================
+F1: PLAN COMPLIANCE AUDIT
+Date: 2026-03-13
+Auditor: oracle agent
+Plan: .sisyphus/plans/hil-testing-architecture.md
+=============================================================================
+
+===========================================================================
+PART A: MUST HAVE (Plan lines 73-81)
+===========================================================================
+
+[1] HardwareController implements identical query(data, commands=[]) interface as SimController
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - File: test/integration/util/hardware_controller.py (283 lines)
+    - Class HardwareController extends BaseController (line 20)
+    - Method signature: query(self, data: Union[str, bytes], commands: list[...] = []) -> bytes (line 152)
+    - Python inspect confirms: HW params=['self','data','commands'], SIM params=['self','data','commands'], Match=True
+    - Implements start(), load(), shutdown(), query() matching BaseController ABC
+
+[2] TestMode extended with UART3 VCP listener (not a new agent)
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - File: src/test_mode.py (695 lines) — MODIFIED existing TestMode class (not a new agent)
+    - UART3 init: self.uart = pyb.UART(3, 115200) at line 45
+    - Platform guard: if not platform.simulator (line 42)
+    - UART polling in command loop: line 113-123
+    - Shared _process_command() method handles both stdin and UART sources
+    - _respond() method routes output to correct channel (stdin→print, uart→uart.write)
+
+[3] Existing tests run unmodified against either backend
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - test/integration/tests/test_basic.py — NO modifications by HIL work (last modified by upstream: taptree #264, Dec 2023)
+    - test/integration/tests/test_with_rpc.py — NO modifications by HIL work (same)
+    - run_tests.py supports --hardware flag (line 12) for backend selection
+    - Monkey-patching approach: sim singleton replaced with HardwareController when --hardware used
+    - Default mode (no flags) still runs SimController
+
+[4] Architecture document with transport analysis, options comparison, and migration path
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - File: docs/hil-architecture.md (971 lines)
+    - 13 sections total (10 required + 3 extras)
+    - Section 1: Transport Analysis — classifies components as transport-specific vs reusable
+    - Section 4: Options Comparison — table with Pros/Cons columns (lines 181-186)
+    - Section 9: Incremental Migration Path — 4 numbered phases with dependencies (lines 657-730+)
+    - All sections reference specific files with paths
+
+[5] Software reset between tests by default
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - HardwareController.reset(hard=False) sends TEST_RESET via UART (line 268-279)
+    - Default is soft reset (hard=False parameter default)
+    - run_tests.py: --hard-reset flag is opt-in, not default (line 15)
+
+[6] Hard reset on demand via st-flash reset
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - STLinkManager.reset() uses: cmd = [self.st_flash_path, 'reset'] (stlink_manager.py:109)
+    - HardwareController.reset(hard=True) calls self._stlink.reset() (hardware_controller.py:252)
+    - run_tests.py has --hard-reset flag (line 15)
+
+[7] Timeout/retry handling for hardware communication failures
+    STATUS: ✅ VERIFIED
+    EVIDENCE:
+    - HardwareController.query() has timeout handling: lines 216-238
+      - On timeout: soft reset + retry once, then raise error
+    - UARTChannel: all read operations use configurable timeout
+    - STLinkManager.flash(): timeout via subprocess.run(timeout=self.flash_timeout) (60s default)
+    - UARTChannel.wait_for_ready(timeout=30) for boot detection
+    - Multiple timeout parameters throughout (5s for queries, 30s for boot, 60s for flash)
+
+MUST HAVE SCORE: 7/7 VERIFIED
+
+===========================================================================
+PART B: MUST NOT HAVE (Plan lines 83-91)
+===========================================================================
+
+[1] No modifications to test files (test_basic.py, test_with_rpc.py)
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - git log shows no HIL-related commits touching these files
+    - Last modifications: upstream (taptree #264, Dec 2023 — pre-HIL)
+
+[2] Using UART3 VCP at 115200, NOT debug UART at 9600
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - test_mode.py:45: self.uart = pyb.UART(3, 115200) — correct UART3 VCP
+    - Only reference to "YB"/9600 is a comment explaining what NOT to use (line 40)
+    - No code paths use pyb.UART("YB", 9600)
+    - UARTChannel defaults to baudrate=115200
+
+[3] No CI/CD integration
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - grep for ci/CI/github.actions/jenkins/pipeline found no CI config in HIL files
+    - No .github/workflows or Jenkinsfile created
+    - No CI-specific code paths in test infrastructure
+
+[4] No multi-device testing
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - grep for multi-device/device-pool/parallel-device returned zero results
+    - Single HardwareController singleton pattern (hw = HardwareController())
+    - Single --port parameter, no device enumeration
+
+[5] No separate testing framework — extends existing patterns
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - grep for pytest/nose/robot imports in util/ returned zero results
+    - Uses existing unittest pattern via run_tests.py
+    - BaseController ABC is a minimal extraction from SimController
+    - HardwareController follows same singleton pattern as SimController
+
+[6] No external dependencies beyond pyserial and stlink-tools/OpenOCD
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - HIL util imports: abc, typing, time, subprocess, serial, os, json, re, platform
+    - Only external: serial (pyserial) — used in uart_channel.py
+    - stlink-tools used via subprocess (st-flash, st-info)
+    - OpenOCD used via subprocess
+    - Note: requests in rpc.py is pre-existing (Bitcoin Core RPC), not HIL code
+    - `re` module in stlink_manager.py is stdlib, not external
+
+[7] No over-abstraction
+    STATUS: ✅ VERIFIED (NO VIOLATION)
+    EVIDENCE:
+    - One controller per backend: SimController, HardwareController
+    - BaseController has exactly 4 abstract methods (start, load, shutdown, query)
+    - Component composition is straightforward: STLinkManager + UARTChannel + CommandMapper
+    - No factory patterns, no dependency injection frameworks, no abstract factory
+
+NOTE: Plan line 90 also says "MUST NOT add excessive error handling or retry logic"
+    STATUS: ✅ VERIFIED
+    - Retry is limited to single retry on timeout in query() — pragmatic, not excessive
+
+MUST NOT HAVE SCORE: 7/7 VERIFIED (zero violations)
+
+===========================================================================
+TASK COMPLETION STATUS
+===========================================================================
+
+Tasks 1-8:  [x] marked complete in plan
+Tasks 9-11: [ ] NOT marked complete in plan
+Tasks F1-F4: [ ] NOT marked complete (FINAL wave — this is F1)
+
+Note: Task 9 (test runner --hardware flag + Makefile targets) appears IMPLEMENTED:
+  - run_tests.py has --hardware, --port, --flash, --hard-reset flags
+  - Makefile has test-hil and test-hil-flash targets
+  Status: Implementation exists but task not checked off in plan
+
+===========================================================================
+VERDICT
+===========================================================================
+
+MUST HAVE:     [7/7 verified]
+MUST NOT HAVE: [7/7 verified — zero violations]
+VERDICT:       APPROVE
+
+All plan requirements are satisfied. No guardrail violations detected.
+The implementation faithfully follows the plan's architecture with correct
+UART3 VCP at 115200, identical query() interface, proper soft/hard reset,
+timeout handling, and zero modifications to existing test files.
+
+=============================================================================
+END OF AUDIT
+=============================================================================

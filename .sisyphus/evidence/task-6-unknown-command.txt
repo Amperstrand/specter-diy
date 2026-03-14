@@ -1,0 +1,17 @@
+Testing unmapped commands raise clear errors:
+
+1. Unknown USB command:
+   Input: b"addwallet test&desc"
+   Error: USB command 'addwallet' is not supported in TestMode. Original command: addwallet test&desc...
+
+2. Sign command (needs PSBT-to-sighash conversion):
+   Input: b"sign cHNidP8BAHECAAAAAQ..."
+   Error: USB 'sign' command requires PSBT-to-sighash conversion. TestMode expects TEST_SIGN:<hex_sighash> (32 bytes hex). Received PSBT: cHNidP8BAHECAAAAAQWaIPxj7qSA0c...
+
+3. Bitcoin address lookup (not supported):
+   Input: b"bitcoin:bcrt1qd7mtkvjmm7rlpgjjfv3902h6c749d7xu"
+   Error: USB command 'bitcoin:' is not supported in TestMode. Original command: bitcoin:bcrt1qd7mtkvjmm7rlpgjjfv3902h6c749d7xu...
+
+4. Unknown GUI command type:
+   Input: UnknownType()
+   Error: Cannot map GUI command of type UnknownType: <__main__.UnknownType object at 0x1080c1160>

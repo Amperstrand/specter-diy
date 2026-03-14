@@ -1,0 +1,89 @@
+================================================================================
+SCOPE FIDELITY CHECK REPORT
+Task: F4 - Scope Fidelity Check
+Date: 2026-03-13
+================================================================================
+
+CHECK 1: TEST FILES UNMODIFIED
+Command: git diff --name-only HEAD~5 | grep -E "test_basic|test_with_rpc"
+Result: EMPTY (no matches)
+Status: OK
+
+--------------------------------------------------------------------------------
+
+CHECK 2: UART CONFIGURATION CORRECT
+Command: grep -n "UART.*9600" src/test_mode.py
+Result: Line 40 - COMMENT ONLY
+  40:        # NOT the debug UART (platform.py stlk = pyb.UART("YB", 9600))
+Note: This is a documentation comment, NOT actual code usage
+
+Command: grep -n "UART.*115200" src/test_mode.py
+Result: Line 45 - ACTUAL USAGE
+  45:                self.uart = pyb.UART(3, 115200)
+Status: OK - Correct 115200 baud rate is used in implementation
+
+--------------------------------------------------------------------------------
+
+CHECK 3: FILES IN SCOPE
+Expected files:
+  - docs/hil-architecture.md
+  - test/integration/util/base_controller.py
+  - test/integration/util/stlink_manager.py
+  - test/integration/util/uart_channel.py
+  - test/integration/util/protocol.py
+  - test/integration/util/hardware_controller.py
+  - test/integration/util/controller.py
+  - test/integration/run_tests.py
+  - src/test_mode.py
+  - Makefile
+
+Actual files modified (git diff --name-only HEAD~5):
+  - Makefile                    [EXPECTED]
+  - docs/hil-architecture.md    [EXPECTED]
+  - f469-disco                  [UNEXPECTED - SCOPE CREEP]
+  - src/test_mode.py            [EXPECTED]
+  - test/integration/run_tests.py                     [EXPECTED]
+  - test/integration/util/base_controller.py          [EXPECTED]
+  - test/integration/util/controller.py               [EXPECTED]
+  - test/integration/util/hardware_controller.py      [EXPECTED]
+  - test/integration/util/protocol.py                 [EXPECTED]
+  - test/integration/util/stlink_manager.py           [EXPECTED]
+  - test/integration/util/uart_channel.py             [EXPECTED]
+
+VIOLATION DETECTED:
+  f469-disco: Submodule pointer updated from 0faa737 to 4fd3e51
+  This is a submodule reference change NOT specified in the plan.
+Status: FAIL - Scope creep detected
+
+--------------------------------------------------------------------------------
+
+CHECK 4: NO CI/CD FILES ADDED
+Command: git diff --name-only HEAD~5 | grep -E "\.yml|\.yaml|ci|workflow"
+Result: EMPTY (no matches)
+Status: OK
+
+================================================================================
+SUMMARY
+================================================================================
+
+TEST_FILES_UNMODIFIED: OK
+UART_CONFIG_CORRECT:   OK
+FILES_IN_SCOPE:        FAIL - Unexpected file: f469-disco (submodule update)
+NO_CI_CD:              OK
+
+================================================================================
+VERDICT: REJECT
+================================================================================
+
+REASON: Scope creep detected. The f469-disco submodule was updated (commit 
+pointer changed from 0faa737 to 4fd3e51) but this change was not part of the
+original plan. The plan only specified modifications to:
+- docs/hil-architecture.md
+- test/integration/util/* files
+- src/test_mode.py
+- Makefile
+
+RECOMMENDATION: Revert the f469-disco submodule change or document why this
+change was necessary and obtain approval for the scope expansion.
+
+================================================================================

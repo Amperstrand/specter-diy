@@ -1,0 +1,40 @@
+=== Flag Parsing Verification ===
+Date: 2026-03-13
+Task: Task 10 - Integration Test
+
+1. --help verification:
+Command: cd test/integration && python3 run_tests.py --help
+
+Result:
+usage: run_tests.py [-h] [--hardware] [--port PORT] [--flash FLASH]
+                    [--hard-reset]
+
+Run integration tests against SimController or HardwareController
+
+options:
+  -h, --help         show this help message and exit
+  --hardware, -H     Use HardwareController instead of SimController
+  --port, -p PORT    Serial port for UART3 VCP (required with --hardware)
+  --flash, -f FLASH  Optional: flash firmware before testing
+  --hard-reset, -r   Use ST-Link hard reset between tests instead of software
+                     reset
+
+Status: PASSED
+
+2. --hardware flag parsing verification:
+Command: cd test/integration && python3 run_tests.py --hardware --port /dev/null
+
+Result:
+Running tests against hardware on port /dev/null
+Test execution failed: Failed to reset device: 2026-03-13T02:35:52 WARN usb.c: Couldn't find any ST-Link devices
+
+Status: PASSED
+- Argparse correctly parses --hardware and --port flags
+- Failure occurs at connection level (ST-Link not found), NOT at argument parsing level
+- This proves the flag integration is working correctly
+
+Summary: All verifications passed
+- HardwareController import: PASSED
+- BaseController subclass relationship: PASSED
+- --hardware flag parsing: PASSED
+- Default behavior (--help): PASSED

@@ -1,0 +1,3 @@
+OK: All interface checks passed
+Methods: ['open', 'close', 'send', 'readline', 'query', 'drain', 'wait_for_ready']
+Init params: ['self', 'port', 'baudrate', 'timeout']

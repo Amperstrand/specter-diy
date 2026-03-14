@@ -1,0 +1,63 @@
+# Task 4: UART Code Check Evidence
+# Generated: 2025-03-13
+
+## UART3 VCP Initialization (Hardware Only)
+Line 41-47:
+        self.uart = None
+        if not platform.simulator:
+            try:
+                import pyb
+                self.uart = pyb.UART(3, 115200)
+            except Exception as e:
+                print("[TestMode] UART3 init failed:", e)
+
+## UART Polling in _command_loop
+Line 114-124:
+                # Poll UART3 VCP for HIL testing (hardware only)
+                if not platform.simulator and self.uart and self.uart.any():
+                    try:
+                        line = self.uart.readline()
+                        if line:
+                            cmd_str = line.decode().strip()
+                            if cmd_str.startswith('TEST_'):
+                                self._current_source = 'uart'
+                                await self._process_command(cmd_str)
+                    except Exception as e:
+                        print("[TestMode] UART error:", e)
+
+## Response Routing in _respond
+Line 178-197:
+    def _respond(self, msg, source=None):
+        """Send response to the appropriate transport.
+        
+        Args:
+            msg: Response message to send
+            source: 'stdin' or 'uart' - if None, uses _current_source
+        """
+        actual_source = source if source is not None else self._current_source
+        
+        if actual_source == 'uart' and self.uart is not None:
+            # Route to UART3 VCP
+            try:
+                self.uart.write((msg + '\n').encode())
+            except Exception as e:
+                print("[TestMode] UART write error:", e)
+                # Fallback to print
+                print("[TestMode] RESP:", msg)
+        else:
+            # Route to stdout (stdin source or fallback)
+            print("[TestMode] RESP:", msg)
+
+## Verification Commands
+grep -n 'uart\|UART(3\|115200\|platform.simulator' src/test_mode.py
+
+Output:
+41:        self.uart = None
+42:        if not platform.simulator:
+45:                self.uart = pyb.UART(3, 115200)
+114:                if not platform.simulator and self.uart and self.uart.any():
+116:                        line = self.uart.readline()
+120:                                self._current_source = 'uart'
+183:            source: 'stdin' or 'uart' - if None, uses _current_source
+187:        if actual_source == 'uart' and self.uart is not None:
+190:                self.uart.write((msg + '\n').encode())

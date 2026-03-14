@@ -1,0 +1,32 @@
+# HardwareController Interface Verification
+
+## Test Date: 2025-03-13
+
+## Verification Command:
+```bash
+cd test/integration && python3 -c "
+from util.hardware_controller import HardwareController
+from util.base_controller import BaseController
+assert issubclass(HardwareController, BaseController)
+hc = HardwareController(port='/dev/null')
+assert hasattr(hc, 'start')
+assert hasattr(hc, 'load')
+assert hasattr(hc, 'shutdown')
+assert hasattr(hc, 'query')
+assert hasattr(hc, 'reset')
+print('OK: HardwareController implements BaseController')"
+```
+
+## Result:
+```
+OK: HardwareController implements BaseController
+```
+
+## Interface Compliance:
+- [x] Extends BaseController ABC
+- [x] Implements start() -> None
+- [x] Implements load() -> None  
+- [x] Implements shutdown() -> None
+- [x] Implements query(data, commands=[]) -> bytes
+- [x] Additional reset(hard=False) -> None convenience method
+- [x] Module-level singleton: hw = HardwareController()
