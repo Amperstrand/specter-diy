@@ -68,6 +68,11 @@ class DebugInfoScreen(Screen):
         # Set firmware info once
         self._set_firmware_info()
 
+    def load(self):
+        """Display this screen."""
+        lv.scr_load(self)
+        update()
+
     def _set_firmware_info(self):
         """Set static firmware version info."""
         try:

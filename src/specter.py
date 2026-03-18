@@ -16,6 +16,7 @@ from platform import (
     get_firmware_boot_mode,
     get_flash_read_protection_status,
     get_flash_write_protection_status,
+    hil_test_mode,
 )
 from hosts import Host, HostError
 from app import BaseApp
@@ -176,8 +177,8 @@ class Specter:
         
         def _debug(msg):
             """Log debug message with Specter context."""
-        
-        _debug("select_keystore: starting detection...")
+            log("Specter", msg)
+
         _debug("select_keystore: starting detection...")
         _debug("Keystores to check: " + str([k.NAME for k in self.keystores]))
         
@@ -188,7 +189,6 @@ class Specter:
         
         # Show debug info screen during keystore detection
         debug_screen = DebugInfoScreen()
-        debug_screen.load()
         
         # Get connection from first card-based keystore for card scanning
         connection = None
@@ -227,7 +227,29 @@ class Specter:
         _debug("Selected keystore: " + keystore_cls.NAME)
         self.keystore = keystore_cls()
 
+        try:
+            import hil
+            hil.set_keystore_name(keystore_cls.NAME)
+            hil.set_keystore_ref(self.keystore)
+        except Exception:
+            pass
+
     async def setup(self):
+        if not hil_test_mode:
+            asyncio.create_task(self._heartbeat())
+        
+        # start HIL listener if in test mode
+        if hil_test_mode:
+            self._hil_handler = self._init_hil_handler()
+            if self._hil_handler is not None:
+                asyncio.create_task(self._hil_listener())
+            # Enable USBHost immediately in HIL mode for hardware testing
+            # This must happen BEFORE unlock() so USB VCP is ready when tests run
+            for host in self.hosts:
+                if host.settings_button == "USB communication" and not host.is_enabled:
+                    log("HIL", "Enabling USBHost early for hardware testing")
+                    await host.enable()
+        
         try:
             # check if the user already selected the keystore class
             if self.keystore is None:
@@ -240,11 +262,48 @@ class Specter:
             await self.keystore.init(self.gui.show_screen(), self.gui.show_loader)
             # unlock with PIN or set up the PIN code
             await self.unlock()
+            # initialize apps with the loaded keystore
+            # (needed for keystores that load keys during unlock, e.g. SeedKeeper)
+            if self.keystore.fingerprint is not None:
+                self.init_apps()
         except Exception as e:
             next_fn = await self.handle_exception(e, self.setup)
             await next_fn()
 
         await self.main()
+
+    async def _heartbeat(self):
+        """Periodic heartbeat to confirm device is alive via serial."""
+        count = 0
+        while True:
+            await asyncio.sleep(5)
+            count += 1
+            log("HEARTBEAT", "alive count=%d" % count)
+
+    def _init_hil_handler(self):
+        """Initialize HIL command handler if available."""
+        try:
+            from hil import HILCommandHandler
+            import platform
+            # Use the debug UART (stlk) for HIL commands
+            uart = platform.stlk
+            handler = HILCommandHandler(uart, self.gui)
+            log("HIL", "Handler initialized")
+            return handler
+        except Exception as e:
+            log_exception("HIL", e)
+            return None
+
+    async def _hil_listener(self):
+        """Listen for HIL test commands on debug UART."""
+        log("HIL", "Listener started")
+        while True:
+            await asyncio.sleep_ms(50)
+            if self._hil_handler is not None:
+                try:
+                    self._hil_handler.poll()
+                except Exception as e:
+                    log_exception("HIL", e)
 
     async def host_exception_handler(self, e):
         try:
@@ -302,6 +361,11 @@ class Specter:
         for host in self.hosts:
             if host.button:
                 await host.enable()
+        # In HIL mode, also enable USB host for hardware testing
+        if hil_test_mode:
+            for host in self.hosts:
+                if host.settings_button == "USB communication" and not host.is_enabled:
+                    await host.enable()
         # for every button we use an ID
         # to avoid mistakes when editing strings
         # If ID is None - it is a section title, not a button

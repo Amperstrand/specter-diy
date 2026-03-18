@@ -341,15 +341,20 @@ class BitcoinRPC:
         # wallet = self.path.split("/")[-1]
         # print(f"{self.counter}: +{len(calls)} {wallet} {methods}")
         headers = {"content-type": "application/json"}
-        payload = [
-            {
+        payload = []
+        for i, call in enumerate(calls):
+            method = call[0]
+            rest = call[1:]
+            if len(rest) == 1 and isinstance(rest[0], dict) and "_kwargs" in rest[0]:
+                params = rest[0]["_kwargs"]
+            else:
+                params = list(rest) if rest != (None,) else []
+            payload.append({
                 "method": method,
-                "params": args if args != [None] else [],
+                "params": params,
                 "jsonrpc": "2.0",
                 "id": i,
-            }
-            for i, (method, *args) in enumerate(calls)
-        ]
+            })
         timeout = self.timeout
         if "timeout" in kwargs:
             timeout = kwargs["timeout"]
@@ -369,8 +374,13 @@ class BitcoinRPC:
 
     def __getattr__(self, method):
         def fn(*args, **kwargs):
-            r = self.multi([(method, *args)], **kwargs)[0]
-            if r["error"] is not None:
+            named = {k: v for k, v in kwargs.items() if k not in ("timeout", "wallet")}
+            if named:
+                call = (method, {"_kwargs": named})
+            else:
+                call = (method,) + args
+            r = self.multi([call], **kwargs)[0]
+            if r.get("error") is not None:
                 raise RpcError("Request error: %s" % r["error"]["message"], r)
             return r["result"]
 

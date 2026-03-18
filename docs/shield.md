@@ -1,1 +1,0 @@
-../shield/README.md

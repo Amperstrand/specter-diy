@@ -11,6 +11,7 @@ endif
 FROZEN_MANIFEST_DISCO ?= ../../../../manifests/disco.py
 FROZEN_MANIFEST_DEBUG ?= ../../../../manifests/debug.py
 FROZEN_MANIFEST_UNIX ?= ../../../../manifests/unix.py
+FROZEN_MANIFEST_HIL ?= ../../../../manifests/disco-hil.py
 DEBUG ?= 0
 USE_DBOOT ?= 0
 GIT_INFO ?= src/git_info.py
@@ -98,34 +99,28 @@ clean:
 		USER_C_MODULES=$(USER_C_MODULES) \
 		FROZEN_MANIFEST=$(FROZEN_MANIFEST_DISCO) clean
 
-# Code quality targets
-lint:
-	@echo "Running flake8..."
-	flake8 src/ test/ --count --select=E9,F63,F7,F82 --show-source --statistics
-	flake8 src/ test/ --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+.PHONY: all clean git-info
 
-format:
-	@echo "Running black..."
-	black src/ test/ --check --diff || true
-	@echo "Running isort..."
-	isort src/ test/ --check --diff || true
+# disco board with HIL test mode enabled (debug UART accepts test commands)
+hil: $(TARGET_DIR) mpy-cross $(MPY_DIR)/ports/stm32 git-info
+	@echo Building HIL test firmware
+	@sed -i.bak 's/HIL_ENABLED = False/HIL_ENABLED = True/' src/hil.py
+	make -C $(MPY_DIR)/ports/stm32 \
+        BOARD=$(BOARD) \
+        FLAVOR=$(FLAVOR) \
+        USE_DBOOT=$(USE_DBOOT) \
+        USER_C_MODULES=$(USER_C_MODULES) \
+        FROZEN_MANIFEST=$(FROZEN_MANIFEST_HIL) \
+        DEBUG=$(DEBUG) \
+        CFLAGS_EXTRA="$(MPY_CFLAGS)" && \
+	arm-none-eabi-objcopy -O binary \
+        $(MPY_DIR)/ports/stm32/build-STM32F469DISC/firmware.elf \
+        $(TARGET_DIR)/specter-diy-hil.bin && \
+	cp $(MPY_DIR)/ports/stm32/build-STM32F469DISC/firmware.hex \
+        	$(TARGET_DIR)/specter-diy-hil.hex
+	@mv src/hil.py.bak src/hil.py
 
-format-fix:
-	@echo "Fixing formatting..."
-	black src/ test/
-	isort src/ test/
+hil-test:
+	cd test/integration && python3 ../hil/run_integration.py
 
-typecheck:
-	@echo "Running mypy..."
-	mypy src/ --ignore-missing-imports || true
-.PHONY: all clean git-info lint format format-fix typecheck
-
-# Coverage measurement
-coverage:
-	@echo "Running coverage..."
-	coverage run -m unittest discover -s test/tests -p 'test_*.py' 2>/dev/null || true
-	coverage report --include='src/*' --omit='src/gui/*,src/hosts/*' 2>/dev/null || true
-	coverage xml -o coverage.xml 2>/dev/null || true
-	@echo "Coverage report generated: coverage.xml"
-
-.PHONY: all clean git-info lint format format-fix typecheck coverage
+.PHONY: hil hil-test

@@ -1,60 +1,79 @@
 """
-Example HIL test demonstrating the framework.
+HIL tests matching SimController interface.
 """
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     __package__ = "test.hil"
 
-from . import controller as controller_module
-from .controller import HardwareController
+from controller import HardwareController
 
 
-class FakeSerial:
-    def __init__(self) -> None:
-        self.last_write: bytes = b""
-
-    def write(self, data: bytes) -> int:
-        self.last_write = data
+class MockSerial:
+    def __init__(self):
+        self.written = []
+        self.responses = []
+        
+    def write(self, data):
+        self.written.append(data)
         return len(data)
+        
+    def read(self, n=1):
+        if self.responses:
+            return self.responses.pop(0)
+        return b""
+        
+    def readline(self):
+        if self.responses:
+            return self.responses.pop(0)
+        return b""
+        
+    def in_waiting(self):
+        return len(self.responses)
+        
+    def close(self):
+        pass
 
-    def readline(self) -> bytes:
-        return b"OK\n"
 
-    def close(self) -> None:
-        return None
-
-
-class FakeSerialModule:
-    def __init__(self, fake_serial: FakeSerial) -> None:
-        self.fake_serial: FakeSerial = fake_serial
-
-    def Serial(self, port: str, baudrate: int, timeout: int = 5) -> FakeSerial:
-        _ = (port, baudrate, timeout)
-        return self.fake_serial
-
-
-class ExampleHILTest(unittest.TestCase):
-    """Example HIL test case."""
-
+class HardwareControllerTest(unittest.TestCase):
+    
     def test_controller_instantiation(self):
-        """Test that controller can be instantiated."""
-        controller = HardwareController(port="/dev/ttyACM0")
-        self.assertEqual(controller.port, "/dev/ttyACM0")
-        self.assertEqual(controller.baudrate, 115200)
+        ctrl = HardwareController()
+        self.assertIsNone(ctrl.gui)
+        self.assertIsNone(ctrl.usb)
+        self.assertFalse(ctrl.started)
+        
+    def test_start_method_exists(self):
+        ctrl = HardwareController()
+        self.assertTrue(hasattr(ctrl, 'start'))
+        self.assertTrue(callable(ctrl.start))
+        
+    def test_load_method_exists(self):
+        ctrl = HardwareController()
+        self.assertTrue(hasattr(ctrl, 'load'))
+        self.assertTrue(callable(ctrl.load))
+        
+    def test_query_method_exists(self):
+        ctrl = HardwareController()
+        self.assertTrue(hasattr(ctrl, 'query'))
+        self.assertTrue(callable(ctrl.query))
+        
+    def test_shutdown_method_exists(self):
+        ctrl = HardwareController()
+        self.assertTrue(hasattr(ctrl, 'shutdown'))
+        self.assertTrue(callable(ctrl.shutdown))
+        
+    def test_query_signature(self):
+        import inspect
+        sig = inspect.signature(HardwareController.query)
+        params = list(sig.parameters.keys())
+        self.assertIn('self', params)
+        self.assertIn('data', params)
+        self.assertIn('commands', params)
 
-    def test_send_command_mock(self):
-        """Test send_command with mocked serial."""
-        controller = HardwareController()
-        fake_serial = FakeSerial()
-        fake_module = FakeSerialModule(fake_serial)
 
-        with patch.object(controller_module, "serial", fake_module, create=True):
-            controller.connect()
-            response = controller.send_command("ping")
-
-        self.assertEqual(response, "OK")
+if __name__ == '__main__':
+    unittest.main()

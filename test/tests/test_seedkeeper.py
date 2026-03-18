@@ -7,7 +7,29 @@ import sys
 sys.path.append('../src')
 
 from unittest import TestCase
-from unittest.mock import MagicMock, patch, PropertyMock
+try:
+    from unittest.mock import MagicMock, patch, PropertyMock
+except ImportError:
+    class MagicMock:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __getattr__(self, name):
+            return MagicMock()
+        def __call__(self, *args, **kwargs):
+            return MagicMock()
+    class patch:
+        @staticmethod
+        def object(cls, attr, new_value):
+            class _Patcher:
+                def __enter__(self):
+                    self._old = getattr(cls, attr, None)
+                    setattr(cls, attr, new_value)
+                    return new_value
+                def __exit__(self, *args):
+                    if self._old is not None:
+                        setattr(cls, attr, self._old)
+            return _Patcher()
+    PropertyMock = MagicMock
 from binascii import hexlify, unhexlify
 
 
@@ -105,7 +127,6 @@ class SeedKeeperImportTest(TestCase):
         expected_aid = b'SeedKeeper'
         self.assertEqual(SeedKeeperApplet.AID, expected_aid,
                         "AID should be {!r}".format(expected_aid))
-                        f"AID should be {expected_aid!r}")
 
 
 # =============================================================================
@@ -172,7 +193,7 @@ class SecureChannelCryptoTest(TestCase):
             padded = pkcs7_pad(data)
             unpadded = pkcs7_unpad(padded)
             self.assertEqual(unpadded, data,
-                            f"Roundtrip failed for {len(data)} bytes")
+                            "Roundtrip failed for %d bytes" % len(data))
     
     def test_pkcs7_unpad_invalid(self):
         """Test pkcs7_unpad with invalid padding raises ValueError."""
@@ -278,7 +299,7 @@ class AppletCommandTest(TestCase):
         
         for method in required_methods:
             self.assertTrue(hasattr(SeedKeeperApplet, method),
-                          f"SeedKeeperApplet missing method: {method}")
+                          "SeedKeeperApplet missing method: %s" % method)
 
 
 # =============================================================================

@@ -3,13 +3,12 @@ from io import BytesIO
 
 
 def _write_bytes(data):
+    """Write debug output to ST-Link UART only.
+    
+    USB VCP is reserved for Bitcoin protocol communication.
+    ST-Link UART (/dev/ttyACM0) is for debug logs and HIL testing.
+    """
     wrote = False
-    try:
-        from pyb import USB_VCP
-        USB_VCP().write(data)
-        wrote = True
-    except Exception:
-        pass
     try:
         import platform
         uart = getattr(platform, "stlk", None)

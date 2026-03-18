@@ -2,6 +2,16 @@ from .applet import Applet, ISOException, AppletException
 from .satochip_securechannel import SatochipSecureChannel
 from binascii import hexlify
 from embit import bip39
+from debug_trace import log
+
+
+def _debug(msg):
+    log("SeedKeeper", msg)
+
+
+def _debug2(msg, *args):
+    """Debug with multiple args - joins them with spaces."""
+    log("SeedKeeper", str(msg) + " " + " ".join(str(a) for a in args))
 
 
 class SeedKeeperApplet(Applet):
@@ -88,7 +98,7 @@ class SeedKeeperApplet(Applet):
         super().__init__(connection, self.AID)
         # Secure channel instance
         self.sc = SatochipSecureChannel()
-        print("[SeedKeeper] Applet initialized")
+        _debug("Applet initialized")
 
     def init_secure_channel(self):
         """
@@ -99,9 +109,9 @@ class SeedKeeperApplet(Applet):
         Note: SELECT MUST be called BEFORE init_secure_channel().
         NEVER re-select after secure channel initialization.
         """
-        print("[SeedKeeper] Establishing secure channel...")
+        _debug("Establishing secure channel...")
         self.sc.initiate(self.conn)
-        print("[SeedKeeper] Secure channel established")
+        _debug("Secure channel established")
 
     def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
         """
@@ -134,7 +144,7 @@ class SeedKeeperApplet(Applet):
         
         # Handle 9c30 - Secure Channel Required (corrupted channel)
         if sw == b"\x9c\x30" and retry:
-            print("[SeedKeeper] Secure channel corrupted (9c30), re-establishing...")
+            _debug("Secure channel corrupted (9c30), re-establishing...")
             # Re-establish secure channel
             self.sc.initiate(self.conn)
             # Retry command once with fresh encryption
@@ -166,7 +176,7 @@ class SeedKeeperApplet(Applet):
         Response: [nb_secrets(2)][total_mem(2)][free_mem(2)][nb_logs_total(2)][nb_logs_avail(2)] SW
         """
         apdu = bytes([self.CLA, self.INS_GET_STATUS, 0x00, 0x00])
-        print("[SeedKeeper] TX (encrypted): GET_STATUS")
+        _debug("TX (encrypted): GET_STATUS")
 
         resp = self.secure_request(apdu)
 
@@ -178,7 +188,7 @@ class SeedKeeperApplet(Applet):
                 'nb_logs_total': (resp[6] << 8) | resp[7],
                 'nb_logs_avail': (resp[8] << 8) | resp[9],
             }
-            print("[SeedKeeper] Status:", status)
+            _debug("Status: %s" % status)
             return status
         return {}
 
@@ -192,16 +202,16 @@ class SeedKeeperApplet(Applet):
             pin = pin.encode()
 
         inner_apdu = bytes([self.CLA, self.INS_VERIFY_PIN, 0x00, 0x00, len(pin)]) + pin
-        print("[SeedKeeper] TX (encrypted): VERIFY_PIN")
+        _debug("TX (encrypted): VERIFY_PIN")
 
         self.secure_request(inner_apdu)
-        print("[SeedKeeper] PIN verified successfully")
+        _debug("PIN verified successfully")
         return (True, None)
 
     def get_card_label(self):
         """Read card-level label via INS 0x3D, p2=0x01."""
         apdu = bytes([self.CLA, self.INS_CARD_LABEL, 0x00, 0x01, 0x00])
-        print("[SeedKeeper] TX (encrypted): CARD_LABEL GET")
+        _debug("TX (encrypted): CARD_LABEL GET")
         resp = self.secure_request(apdu)
         if len(resp) == 0:
             return ""
@@ -209,13 +219,13 @@ class SeedKeeperApplet(Applet):
         if label_len == 0:
             return ""
         if len(resp) < 1 + label_len:
-            print("[SeedKeeper] CARD_LABEL GET: malformed response")
+            _debug("CARD_LABEL GET: malformed response")
             return ""
         try:
             label = bytes(resp[1:1 + label_len]).decode("utf-8")
         except Exception:
             label = hexlify(bytes(resp[1:1 + label_len])).decode()
-        print("[SeedKeeper] Card label:", label)
+        _debug("Card label: %s" % label)
         return label
 
     def set_card_label(self, label):
@@ -234,9 +244,9 @@ class SeedKeeperApplet(Applet):
         else:
             payload = bytes([len(label_bytes)]) + label_bytes
             apdu = bytes([self.CLA, self.INS_CARD_LABEL, 0x00, 0x00, len(payload)]) + payload
-        print("[SeedKeeper] TX (encrypted): CARD_LABEL SET")
+        _debug("TX (encrypted): CARD_LABEL SET")
         self.secure_request(apdu)
-        print("[SeedKeeper] Card label updated")
+        _debug("Card label updated")
 
     def list_secret_headers(self):
         """
@@ -250,30 +260,30 @@ class SeedKeeperApplet(Applet):
 
         while True:
             apdu = bytes([self.CLA, self.INS_LIST_SECRETS, 0x00, p2])
-            print("[SeedKeeper] TX (encrypted): LIST_SECRETS", "(INIT)" if p2 == 0x01 else "(NEXT)")
+            _debug("TX (encrypted): LIST_SECRETS " + ("(INIT)" if p2 == 0x01 else "(NEXT)"))
 
             try:
                 resp = self.secure_request(apdu)
             except ISOException as e:
                 # 9c12 = no more secrets (end of list)
                 if str(e) == "9c12":
-                    print("[SeedKeeper] End of secret list (no more)")
+                    _debug("End of secret list (no more)")
                     break
                 raise
 
             # Empty response = end of list
             if len(resp) == 0:
-                print("[SeedKeeper] End of secret list")
+                _debug("End of secret list")
                 break
 
             if len(resp) >= 15:
                 header = self._parse_header(resp)
-                print("[SeedKeeper] Found secret:", header)
+                _debug("Found secret: %s" % header)
                 headers.append(header)
 
             p2 = 0x02  # NEXT for subsequent calls
 
-        print("[SeedKeeper] Total secrets found:", len(headers))
+        _debug("Total secrets found: %s" % len(headers))
         return headers
 
     def _parse_header(self, data):
@@ -323,10 +333,10 @@ class SeedKeeperApplet(Applet):
         # INIT - returns header only, NOT chunk data!
         # Response format: [id(2b) | header(13b) | label(N) | IV(16b, optional)]
         apdu = bytes([self.CLA, self.INS_EXPORT_SECRET, 0x01, 0x01, 0x02]) + sid_bytes
-        print("[SeedKeeper] TX (encrypted): EXPORT INIT")
+        _debug("TX (encrypted): EXPORT INIT")
 
         resp = self.secure_request(apdu)
-        print("[SeedKeeper] EXPORT INIT response (header):", ''.join('{:02x}'.format(b) for b in resp) if len(resp) > 0 else "empty")
+        _debug("EXPORT INIT response (header): %s" % ''.join('{:02x}'.format(b) for b in resp) if len(resp) > 0 else "empty")
         
         # Parse header to get label length (so we know where data starts in header)
         # Header format: id(2) | type(1) | origin(1) | export_rights(1) | export_nbplain(1) |
@@ -334,12 +344,12 @@ class SeedKeeperApplet(Applet):
         #                rfu(1) | label_len(1) | label(N)
         # Total header size = 13 + label_len
         if len(resp) < 13:
-            print("[SeedKeeper] ERROR: INIT response too short")
+            _debug("ERROR: INIT response too short")
             return b''
         
         header_label_len = resp[12]  # label_len is at offset 12
         header_size = 13 + header_label_len
-        print("[SeedKeeper] Header size:", header_size, "(label_len:", header_label_len, ")")
+        _debug("Header size: %d (label_len: %d)" % (header_size, header_label_len))
         
         # Collect chunks from UPDATE calls
         chunks = []
@@ -348,17 +358,17 @@ class SeedKeeperApplet(Applet):
         chunk_num = 1
         while True:
             apdu = bytes([self.CLA, self.INS_EXPORT_SECRET, 0x01, 0x02, 0x02]) + sid_bytes
-            print("[SeedKeeper] TX (encrypted): EXPORT UPDATE")
+            _debug("TX (encrypted): EXPORT UPDATE")
 
             resp = self.secure_request(apdu)
 
             if len(resp) < 2:
-                print("[SeedKeeper] UPDATE response too short, stopping")
+                _debug("UPDATE response too short, stopping")
                 break
                 
             # Response format: [chunk_size(2b) | chunk_data | sig_size(2b) | sig]
             chunk_size = (resp[0] << 8) | resp[1]
-            print("[SeedKeeper] Chunk", chunk_num, "len:", chunk_size)
+            _debug("Chunk %d len: %d" % (chunk_num, chunk_size))
             
             if chunk_size > 0:
                 chunk_data = resp[2:2 + chunk_size]
@@ -371,18 +381,18 @@ class SeedKeeperApplet(Applet):
             if chunk_size + 2 < response_size:
                 sig_offset = 2 + chunk_size
                 sig_size = (resp[sig_offset] << 8) | resp[sig_offset + 1]
-                print("[SeedKeeper] Final chunk detected (has signature, size:", sig_size, ")")
+                _debug("Final chunk detected (has signature, size: %d)" % sig_size)
                 break
             
             chunk_num += 1
 
             # Safety limit
             if chunk_num > 50:
-                print("[SeedKeeper] WARNING: Too many chunks, aborting")
+                _debug("WARNING: Too many chunks, aborting")
                 break
 
         result = b''.join(chunks)
-        print("[SeedKeeper] Exported secret total length:", len(result))
+        _debug("Exported secret total length: %s" % len(result))
         return result
 
     def _parse_masterseed_to_mnemonic(self, secret_data: bytes) -> str:
@@ -398,7 +408,7 @@ class SeedKeeperApplet(Applet):
         Returns:
             Mnemonic string
         """
-        print("[SeedKeeper] Parsing MASTERSEED format...")
+        _debug("Parsing MASTERSEED format...")
         
         # Dynamic offset parsing
         offset = 0
@@ -414,9 +424,8 @@ class SeedKeeperApplet(Applet):
         
         entropy = secret_data[offset:offset + entropy_size]
         
-        print("[SeedKeeper] MASTERSEED: masterseed_size=", masterseed_size, 
-              "wordlist=", wordlist, "entropy_size=", entropy_size)
-        print("[SeedKeeper] Entropy (hex):", ''.join('{:02x}'.format(b) for b in entropy))
+        _debug("MASTERSEED: masterseed_size=%s wordlist=%s entropy_size=%s" % (masterseed_size, wordlist, entropy_size))
+        _debug("Entropy (hex): %s" % ''.join('{:02x}'.format(b) for b in entropy))
         
         return bip39.mnemonic_from_bytes(entropy)
 
@@ -430,7 +439,7 @@ class SeedKeeperApplet(Applet):
             secret_id: Optional secret ID to directly export. If provided, skips header search.
             secret_type: Optional secret type for parsing when secret_id is provided.
         """
-        print("[SeedKeeper] get_bip39_secret called with secret_id:", secret_id, "secret_type:", hex(secret_type) if secret_type else None)
+        _debug("get_bip39_secret called with secret_id: %s secret_type: %s" % (secret_id, hex(secret_type) if secret_type else None))
         
         # If secret_id provided, use it directly instead of searching headers
         if secret_id is not None:
@@ -442,7 +451,7 @@ class SeedKeeperApplet(Applet):
                         secret_type = h['type']
                         break
             
-            print("[SeedKeeper] Direct export with secret_id:", secret_id, "type:", hex(secret_type) if secret_type else None)
+            _debug("Direct export with secret_id: %s type: %s" % (secret_id, hex(secret_type) if secret_type else None))
             
             # Export the secret directly
             secret_data = self.export_secret(secret_id)
@@ -452,21 +461,21 @@ class SeedKeeperApplet(Applet):
                 return self._parse_masterseed_to_mnemonic(secret_data)
             else:
                 # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
-                print("[SeedKeeper] Parsing BIP39 format...")
+                _debug("Parsing BIP39 format...")
                 if len(secret_data) >= 2:
                     entropy_len = (secret_data[0] << 8) | secret_data[1]
                     entropy = secret_data[2:2 + entropy_len]
-                    print("[SeedKeeper] Entropy length:", entropy_len)
+                    _debug("Entropy length: %s" % entropy_len)
 
                     # Convert to mnemonic
                     mnemonic = bip39.mnemonic_from_bytes(entropy)
-                    print("[SeedKeeper] Successfully converted to mnemonic")
+                    _debug("Successfully converted to mnemonic")
                     return mnemonic
 
             raise AppletException("Invalid BIP39 secret format")
         
         # Default: search for first BIP39 or MASTERSEED secret
-        print("[SeedKeeper] Searching for BIP39 secrets...")
+        _debug("Searching for BIP39 secrets...")
         headers = self.list_secret_headers()
 
         # Find first BIP39 or MASTERSEED secret (can both be converted to mnemonic)
@@ -477,10 +486,10 @@ class SeedKeeperApplet(Applet):
                 break
 
         if bip39_header is None:
-            print("[SeedKeeper] No BIP39/MASTERSEED secrets found")
+            _debug("No BIP39/MASTERSEED secrets found")
             raise AppletException("No BIP39 or MASTERSEED secrets found on card")
 
-        print("[SeedKeeper] Found secret, id:", bip39_header['id'], "type:", hex(bip39_header['type']), "label:", bip39_header['label'])
+        _debug("Found secret, id: %s type: %s label: %s" % (bip39_header['id'], hex(bip39_header['type']), bip39_header['label']))
 
         # Export the secret
         secret_data = self.export_secret(bip39_header['id'])
@@ -490,15 +499,15 @@ class SeedKeeperApplet(Applet):
             return self._parse_masterseed_to_mnemonic(secret_data)
         else:
             # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
-            print("[SeedKeeper] Parsing BIP39 format...")
+            _debug("Parsing BIP39 format...")
             if len(secret_data) >= 2:
                 entropy_len = (secret_data[0] << 8) | secret_data[1]
                 entropy = secret_data[2:2 + entropy_len]
-                print("[SeedKeeper] Entropy length:", entropy_len)
+                _debug("Entropy length: %s" % entropy_len)
 
                 # Convert to mnemonic
                 mnemonic = bip39.mnemonic_from_bytes(entropy)
-                print("[SeedKeeper] Successfully converted to mnemonic")
+                _debug("Successfully converted to mnemonic")
                 return mnemonic
 
         raise AppletException("Invalid BIP39 secret format")
@@ -511,13 +520,13 @@ class SeedKeeperApplet(Applet):
         
         Returns: list of dicts with 'id', 'label', 'descriptor' keys
         """
-        print("[SeedKeeper] Searching for descriptor secrets...")
+        _debug("Searching for descriptor secrets...")
         headers = self.list_secret_headers()
         
         descriptors = []
         for h in headers:
             if h['type'] == self.SECRET_TYPE_DESCRIPTOR:
-                print("[SeedKeeper] Found descriptor secret id:", h['id'], "label:", h['label'])
+                _debug("Found descriptor secret id: %s label: %s" % (h['id'], h['label']))
                 try:
                     secret_data = self.export_secret(h['id'])
                     # Descriptor format: [size(2)][descriptor_string]
@@ -529,9 +538,9 @@ class SeedKeeperApplet(Applet):
                             'label': h['label'],
                             'descriptor': descriptor_str
                         })
-                        print("[SeedKeeper] Descriptor:", descriptor_str[:50] + "..." if len(descriptor_str) > 50 else descriptor_str)
+                        _debug("Descriptor: %s" % descriptor_str[:50] + "..." if len(descriptor_str) > 50 else descriptor_str)
                 except Exception as e:
-                    print("[SeedKeeper] Failed to export descriptor", h['id'], ":", e)
+                    _debug("Failed to export descriptor %s: %s" % (h['id'], e))
         
-        print("[SeedKeeper] Found %d descriptor secrets" % len(descriptors))
+        _debug("Found %d descriptor secrets" % len(descriptors))
         return descriptors

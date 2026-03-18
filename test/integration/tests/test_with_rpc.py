@@ -9,9 +9,11 @@ from embit.transaction import Transaction, SIGHASH
 from embit import ec, bip32
 from embit.script import Witness
 
+
 rpc = prepare_rpc()
 wdefault = rpc.wallet("")
 wallet_prefix = "test/"+random.randint(0,0xFFFFFFFF).to_bytes(4,'big').hex()
+
 
 class RPCTest(TestCase):
     """Complete tests with Core on regtest - should catch problems with signing of transactions"""
@@ -242,25 +244,40 @@ class RPCTest(TestCase):
 
         has_descriptor_support = "6. descriptors" in rpc.help("createwallet")
         if has_descriptor_support:
-            rpc.createwallet(wname, True, True, "", False, False)
+            rpc.createwallet(wallet_name=wname, disable_private_keys=True, blank=True, descriptors=True)
         else:
             rpc.createwallet(wname, True, True)
         w = rpc.wallet(wname)
-        res = w.importmulti([{
-                "scriptPubKey": {"address": addr1},#d1.script_pubkey().data.hex(),
-                # "witnessscript": d1.witness_script().data.hex(),
-                # "pubkeys": [k.sec().hex() for k in d1.keys],
+        info = w.getwalletinfo()
+        use_descriptors = info.get("descriptors", False)
+        if use_descriptors:
+            desc_recv = f"wsh(and_v(v:pk([{fgp}/{path}]{xpub}/0/*),after(10)))"
+            desc_change = f"wsh(and_v(v:pk([{fgp}/{path}]{xpub}/1/*),after(10)))"
+            desc_recv_checksum = rpc.getdescriptorinfo(desc_recv)["descriptor"]
+            desc_change_checksum = rpc.getdescriptorinfo(desc_change)["descriptor"]
+            res = w.importdescriptors([{
+                "desc": desc_recv_checksum,
                 "internal": False,
                 "timestamp": "now",
-                "watchonly": True,
+                "active": True,
             },{
-                "scriptPubKey": {"address": addr2},#d2.script_pubkey().data.hex(),
-                # "witnessscript": d2.witness_script().data.hex(),
-                # "pubkeys": [k.sec().hex() for k in d2.keys],
+                "desc": desc_change_checksum,
                 "internal": True,
                 "timestamp": "now",
-                "watchonly": True,
-            }],{"rescan": False})
+                "active": True,
+            }])
+        else:
+            res = w.importmulti([{
+                    "scriptPubKey": {"address": addr1},
+                    "internal": False,
+                    "timestamp": "now",
+                    "watchonly": True,
+                },{
+                    "scriptPubKey": {"address": addr2},
+                    "internal": True,
+                    "timestamp": "now",
+                    "watchonly": True,
+                }],{"rescan": False})
         self.assertTrue(all([k["success"] for k in res]))
         wdefault.sendtoaddress(addr1, 0.1)
         rpc.mine()

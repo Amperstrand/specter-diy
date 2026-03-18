@@ -1,2 +1,0 @@
-OK: ImportError raised (pyserial not installed)
-    Message: pyserial is required for UART communication. Install with: pip install pyserial

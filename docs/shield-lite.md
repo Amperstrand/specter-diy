@@ -1,1 +1,0 @@
-../shield-lite/readme.md

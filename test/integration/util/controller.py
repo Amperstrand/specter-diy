@@ -54,6 +54,14 @@ class SimController:
                                 stdout=subprocess.PIPE,
                                 shell=True, preexec_fn=os.setsid)
         time.sleep(1)
+        ret = self.proc.poll()
+        if ret is not None and ret == -11:
+            print("")
+            print("ERROR: Simulator crashed with SIGSEGV (signal 11).")
+            print("This is a known issue with NVIDIA GPU drivers + SDL2.")
+            print("Workaround: SDL_VIDEODRIVER=software python3 run_tests.py")
+            self.shutdown()
+            raise RuntimeError("Simulator SIGSEGV")
 
     def load(self):
         # command socket
@@ -89,9 +97,9 @@ class SimController:
         assert res == b"ACK\r\n"
         # if we need to confirm anything
         for command in commands:
-            sim.gui.send(command)
+            self.gui.send(command)
             time.sleep(0.3)
-        res = sim.usb.receive()
+        res = self.usb.receive()
         return res.strip()
 
 class BitcoinCore:

@@ -4,6 +4,7 @@ import sys
 import pyb
 import asyncio
 import platform
+from debug_trace import log_exception
 
 
 class USBHost(Host):
@@ -30,12 +31,19 @@ class USBHost(Host):
             self.usb.init(flow=(pyb.USB_VCP.RTS | pyb.USB_VCP.CTS))
             if platform.simulator:
                 print("Connect to 127.0.0.1:8789 to do USB communication")
+            if platform.hil_test_mode:
+                self.settings["enabled"] = True
+                platform.enable_usb()
 
     def load_settings(self, *args, **kwargs):
         super().load_settings(*args, **kwargs)
+        if platform.hil_test_mode and not self.is_enabled:
+            self.settings["enabled"] = True
+            if self.usb is None:
+                self.init()
         if self.is_enabled:
             platform.enable_usb()
-        else:
+        elif not platform.hil_test_mode:
             platform.disable_usb()
 
     async def enable(self):
@@ -115,7 +123,7 @@ class USBHost(Host):
         # if not - create new file on the ramdisk
         if self.f is None:
             self.f = open(self.path + "/data", "wb")
-        # check if we don't have EOL in the data
+        # check if we dont have EOL in the data
         if b"\n" not in res and b"\r" not in res:
             self.f.write(res)
             return
@@ -171,9 +179,9 @@ class USBHost(Host):
                 sys.print_exception(e)
             # for all other exceptions - send back generic message
             except Exception as e:
+                log_exception("USB", e)
                 if platform.simulator:
                     self.respond(b"error: Unknown error %s" % e)
-                    sys.print_exception(e)
                 else:
                     self.respond(b"error: Unknown error")
             self.cleanup()

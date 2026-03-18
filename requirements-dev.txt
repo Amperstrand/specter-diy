@@ -1,0 +1,11 @@
+# Local development and testing dependencies
+# Install: source .venv/bin/activate && pip install -r requirements-dev.txt
+
+embit
+flake8
+mypy
+black
+isort
+coverage
+pytest
+pyserial

@@ -12,7 +12,11 @@ import platform
 from helpers import load_apps
 from app import BaseApp
 import display
-from debug_trace import log_exception
+from debug_trace import log, log_exception
+
+if platform.hil_test_mode:
+    os.dupterm(None, 0)
+    log("BOOT", "HIL mode: dupterm disabled (USB VCP already enabled in boot.py)")
 
 def main(apps=None, network="main", keystore_cls=None):
     """
@@ -20,8 +24,15 @@ def main(apps=None, network="main", keystore_cls=None):
     network: default network to operate
     keystores: list of KeyStore classes that can be used
     """
+    log("BOOT", "main() started")
+
+    if platform.hil_test_mode and network == "main":
+        network = "regtest"
+        log("BOOT", "HIL mode: forcing network=regtest")
+    
     # Init display first as it also inits the SDRAM
     display.init(False)
+    log("BOOT", "Display initialized")
     # create virtual file system /sdram
     # for temp untrusted data storage
     rampath = platform.mount_sdram()
@@ -78,6 +89,7 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
+    log("BOOT", "Starting Specter...")
     specter.start()
 
 
