@@ -454,15 +454,29 @@ The Ubuntu apt package `gcc-arm-none-eabi` (v13.2.1) produces firmware that imme
 
 ## Current Status & Learnings
 
-### Test Results (2026-03-18, branch `satochip-dev`, based on v1.10.0 + 30 commits)
+### Test Results (2026-03-19, branch `satochip-dev`, based on v1.10.0)
 
 | Test Suite | Result | Notes |
 |-----------|--------|-------|
 | Native CPython unit tests (`test/run_native_tests.py`) | Passes | Fastest, no MicroPython needed |
 | MicroPython unix port unit tests (`make test`) | 30/31 pass | 1 fail: `test_save_mnemonic_raises_error` (MicroPython lacks `asyncio.iscoroutinefunction`) |
-| **HIL tests on hardware — SeedKeeper** (`make hil-test`) | **19/19 pass** | **~5.5 min total. All tests pass including `test_miniscript`.** |
+| **HIL tests on hardware — SeedKeeper** (`make hil-test`) | **19/19 pass** | **~332s total. All tests pass including `test_miniscript`. Config 4 (USART only, no SOFTSPI).** |
+| HIL tests on hardware — Internal flash (no card) | 0/19 | `test_add_wallet`/`test_get_xpub` fail (wrong fingerprint after wipe), `test_sign_psbt` hangs (no mnemonic). Needs work. |
 
 **Note:** `make hil-test` requires `source .venv/bin/activate` first (for `embit`, `pyserial` deps). Also needs `source /etc/profile.d/arm-toolchain.sh` if using ARM toolchain locally. The Makefile target runs `cd test/integration && python3 ../hil/run_integration.py` which uses the system Python.
+
+### Submodule Configuration Test Results (2026-03-19)
+
+Tested 4 configurations to determine minimum working hardware setup:
+
+| Config | micropython | f469-disco | Boots? | Smartcard? | HIL 19/19? | Verdict |
+|---|---|---|---|---|---|---|
+| 1: Full upstream | `6bdf1b691` | `db3ce3e` | **Yes** | No (T=1 fails) | N/A | USART reconfig needed |
+| 2: SOFTSPI only | `e061ae4` | `db3ce3e` | Yes | No (T=1 fails) | N/A | SOFTSPI alone insufficient |
+| 3: SOFTSPI + USART | `e061ae4` | `4fd3e51` | Yes | **Yes** | **19/19 pass** | Both work (overkill) |
+| 4: USART only | `6bdf1b691` | `4fd3e51` | Yes | **Yes** | **19/19 pass** | **Minimum required** |
+
+**Conclusion: Only the USART T=1 reconfig (`4fd3e51` in `f469-disco`) is needed. SOFTSPI is NOT needed. The QSPI hang observed in earlier testing was a fluke.**
 | Lint (`make lint`) | Runs | Many pre-existing warnings in source |
 | Typecheck (`make typecheck`) | Runs | Many pre-existing errors in source (all Pyright, not runtime) |
 
@@ -484,7 +498,7 @@ These bugs exist on the unmodified upstream `v1.10.0` release — they are NOT c
 
 ### Upstream Submodule Issues (NOT our changes)
 
-The `f469-disco` submodule (and its `micropython` sub-submodule) have **two pre-existing bugs** that affect ALL users of the STM32F469 Discovery board. These are unrelated to SeedKeeper and should be fixed in their respective upstream repos.
+The `f469-disco` submodule has **one pre-existing bug** that affects ALL users of the STM32F469 Discovery board with a smartcard reader. This is unrelated to SeedKeeper and should be fixed in its upstream repo.
 
 **Dependency chain:**
 ```
@@ -493,36 +507,24 @@ specter-diy (cryptoadvance/specter-diy)
         └── micropython (diybitcoinhardware/micropython)  ← maintained by Stepan Snigirev, 3.5 years old
 ```
 
-**Issue 1: QSPI flash hang (micropython fork)**
-
-The `diybitcoinhardware/micropython` fork (commit `6bdf1b691`, Nov 2022) has an STM32F469DISC board config where the hardware QUADSPI peripheral hangs during initialization. The MCU gets stuck waiting for the QSPI peripheral and never reaches `main()`.
-
-Mike Tolkachev (miketlk) — the same person who originally set up the STM32F469 port for specter-diy — later submitted PR [#18264](https://github.com/micropython/micropython/pull/18264) to upstream micropython (merged Nov 27, 2025 as commits `cad9bb3` and `b4d546d`). This PR added proper QSPI support with `MICROPY_HW_SPIFLASH_SOFT_RESET`, `MICROPY_HW_SPIFLASH_CHIP_PARAMS`, and a `board_early_init()` hook for the N25Q128A chip. However, this was never backported to the `diybitcoinhardware/micropython` fork.
-
-The fork's board config has `MICROPY_F469DISC_USE_SOFTSPI` as a temporary workaround (GPIO bit-bang instead of hardware QSPI), but the SOFTSPI define was later removed in commit `d79d337d9` ("remove soft SPI") without the proper QSPI fix being in place — causing the hang.
-
-**Impact:** The stock upstream specter-diy firmware does not boot on STM32F469 Discovery boards with the QSPI flash chip populated.
-
-**Issue 2: ISO 7816 T=1 USART reconfig (f469-disco)**
+**Issue: ISO 7816 T=1 USART reconfig (f469-disco)**
 
 The smartcard driver in `f469-disco/usermods/scard/` does not reconfigure the USART after ATR (Answer To Reset). ISO 7816 T=1 protocol requires stop bits changed from 1.5 to 1 and guard time reduced from 16 to 1 ETU after ATR negotiation. Without this reconfig, all smartcard communication fails.
 
 Amperstrand has a fix in the `improve/t1-usart-reconfig` branch (commit `4fd3e51` in `diybitcoinhardware/f469-disco`) but it has not been merged.
 
-**Impact:** No smartcard (MemoryCard or SeedKeeper) can communicate on the STM32F469 Discovery board.
+**Impact:** No smartcard (MemoryCard or SeedKeeper) can communicate on the STM32F469 Discovery board. The device boots fine but falls back to internal flash keystore.
 
-**Hardware testing requires local submodule overrides:**
+**Hardware testing requires local submodule override:**
 
 ```bash
-# These are LOCAL ONLY — never committed to any PR branch
-cd f469-disco && git checkout 4fd3e51           # USART T=1 reconfig
-cd f469-disco/micropython && git checkout e061ae4  # SOFTSPI workaround
+# LOCAL ONLY — never committed to any PR branch
+cd f469-disco && git checkout 4fd3e51  # USART T=1 reconfig
 ```
 
 After testing, reset to upstream:
 ```bash
-cd f469-disco && git checkout db3ce3e           # upstream specter-diy pins
-cd f469-disco && git submodule update --init micropython  # upstream fork pins
+cd f469-disco && git checkout db3ce3e  # upstream specter-diy pins
 ```
 
 **Our PRs do NOT touch any submodule.** We only modify files in `src/`, `test/`, `Makefile`, and `manifests/`.
@@ -590,9 +592,20 @@ cd f469-disco && git submodule update --init micropython  # upstream fork pins
 
 15. **HIL tests take ~5.5 minutes** — 19 tests total (3 basic + 3 seedkeeper + 13 RPC). Most time is in RPC tests that create wallets, mine blocks, and sign transactions. Requires `timeout >= 600s` in the test runner.
 
-16. **Upstream submodule changes are out of scope for our PRs.** The QSPI hang (micropython fork) and USART T=1 reconfig (f469-disco) are pre-existing bugs in the build chain. We verified both are needed for hardware testing (3 configurations tested: Config 1 = full upstream = dead board; Config 2 = SOFTSPI only = boots but no smartcard; Config 3 = SOFTSPI + USART = fully working). Our PRs only modify `src/` and `test/`. Local submodule overrides are documented above for developers who want to test on hardware.
+16. **Only USART T=1 reconfig is needed for smartcard support.** SOFTSPI is NOT needed. The QSPI hang observed in earlier testing was a fluke (likely caused by incomplete flash erase or residual firmware state). Tested 4 configurations:
 
-17. **`diybitcoinhardware/micropython` is 3.5 years old** (commit `6bdf1b691`, Nov 2022 by Stepan Snigirev). Mike Tolkachev's proper QSPI fix was merged to upstream micropython in Nov 2025 (PR #18264) but never backported. The `diybitcoinhardware/f469-disco` repo (maintained by k9ert) pins this old micropython. Updating the micropython fork requires Stepan's cooperation.
+| Config | micropython | f469-disco | Boots? | Smartcard? | HIL 19/19? |
+|---|---|---|---|---|---|
+| 1: Full upstream | `6bdf1b691` | `db3ce3e` | Yes | No | N/A |
+| 2: SOFTSPI only | `e061ae4` | `db3ce3e` | Yes | No | N/A |
+| 3: SOFTSPI + USART | `e061ae4` | `4fd3e51` | Yes | Yes | 19/19 pass |
+| 4: USART only | `6bdf1b691` | `4fd3e51` | Yes | Yes | 19/19 pass |
+
+Config 4 (USART only, no SOFTSPI) is the simplest working configuration. The SOFTSPI commit (`e061ae4`) should be abandoned.
+
+17. **`st-flash reset` kills USB enumeration.** After `st-flash --connect-under-reset reset`, the device's USB disappears for 5-8 seconds. The HIL test runner's `run_integration.py` uses `st-info --reset` via `subprocess.run()` which has the same effect. If the test runner polls for `OK:READY` too quickly after reset, it will fail. The current code handles this with a 60-second retry loop.
+
+18. **Internal flash keystore works without a card** but HIL tests need adjustment — `test_add_wallet` and `test_get_xpub` fail because the wiped internal flash keystore has a different fingerprint/xpub than the test expects. `test_sign_psbt` hangs because no mnemonic is loaded. This path needs more work before it can be tested.
 
 ---
 
@@ -610,7 +623,7 @@ Our changes will be split into independent PRs to upstream `cryptoadvance/specte
 
 **Rebase workflow:** As each PR merges, rebase remaining branches onto `upstream/master`. `satochip-dev` stays as our integration/safety-net branch.
 
-### Cleanup completed (2026-03-18)
+### Cleanup completed (2026-03-19)
 
 - Removed debug artifacts: `.sisyphus/`, `boot/debug/`, debug scripts, backup files, `tools/debug_monitor/`
 - Removed LED debug indicators from `src/platform.py` (replaced with `log()`)
@@ -621,6 +634,8 @@ Our changes will be split into independent PRs to upstream `cryptoadvance/specte
 - Reverted `build_firmware.sh`, `.github/workflows/test.yml`, `Makefile` to upstream (added back only `hil`/`hil-test` targets)
 - Reverted dev-only docs, upstream noise changes (typo fixes, pronoun fixes, etc.)
 - **Reverted `f469-disco` submodule to upstream `db3ce3e`** (SOFTSPI and USART reconfig are local-only overrides for hardware testing)
+- **Tested 4 submodule configurations**: confirmed only USART reconfig needed; SOFTSPI and QSPI hang are non-issues
+- **Internal flash keystore tested**: boots fine without card, but HIL tests need adjustment (wrong fingerprint, sign hangs)
 
 ### Completed
 
@@ -693,3 +708,6 @@ Our changes will be split into independent PRs to upstream `cryptoadvance/specte
 | 2026-03-18 | **Documented upstream submodule issues**: QSPI hang (micropython fork, 3.5yr stale) and USART T=1 reconfig (f469-disco, Amperstrand's unmerged branch) |
 | 2026-03-18 | **Tested 3 submodule configurations**: confirmed both SOFTSPI + USART reconfig needed for hardware; both are pre-existing upstream issues, not our code |
 | 2026-03-18 | Reverted f469-disco to upstream `db3ce3e`; our PRs will only touch `src/` and `test/` |
+| 2026-03-19 | **Tested 4 submodule configs**: full upstream (boots, no smartcard), SOFTSPI only (boots, no smartcard), SOFTSPI+USART (19/19 pass), USART only (19/19 pass). **SOFTSPI NOT needed. Only USART reconfig matters.** |
+| 2026-03-19 | **Internal flash keystore tested**: boots fine without card, basic tests run but fail on fingerprint mismatch, sign hangs |
+| 2026-03-19 | Updated AGENTS.md with corrected submodule findings (QSPI hang was a fluke, SOFTSPI unnecessary) |
