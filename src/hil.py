@@ -190,6 +190,16 @@ class HILCommandHandler:
             self._gp_delete(line[len("TEST_GP_DELETE:"):])
             return
 
+        # TEST_GP_INSTALL - install MemoryCard applet
+        if line == "TEST_GP_INSTALL":
+            self._gp_install()
+            return
+
+        # TEST_GP_VERIFY - verify MemoryCard is installed
+        if line == "TEST_GP_VERIFY":
+            self._gp_verify()
+            return
+
         # Fallback: try to parse as JSON (mirrors TCPGUI behavior)
         try:
             json.loads("[%s]" % line)
@@ -485,3 +495,63 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_DELETE_FAIL:%s" % str(e))
+
+    def _gp_install(self):
+        try:
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.profiles import JCOP4_PROFILE
+            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.loader import install_memorycard, verify_install
+            from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
+            from binascii import hexlify
+            import hashlib
+
+            sha = hashlib.sha256(CAP_DATA).hexdigest()
+            if sha != CAP_SHA256:
+                self._respond("ERR:GP_INSTALL_FAIL:CAP hash mismatch")
+                return
+
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+            session = open_session(conn, JCOP4_PROFILE)
+
+            package_aid = bytes.fromhex("B00B5111CB")
+            applet_aid = bytes.fromhex("B00B5111CB01")
+            instance_aid = bytes.fromhex("B00B5111CB01")
+            sd_aid = JCOP4_PROFILE["isd_aid"]
+            privileges = JCOP4_PROFILE["privileges"]
+
+            self._respond("OK:GP_INSTALL:loading")
+            install_memorycard(
+                session, CAP_DATA, package_aid, applet_aid,
+                instance_aid, sd_aid, privileges)
+
+            if verify_install(session, instance_aid):
+                self._respond("OK:GP_INSTALL:success")
+            else:
+                self._respond("ERR:GP_INSTALL_FAIL:verify failed")
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_INSTALL_FAIL:%s" % str(e))
+
+    def _gp_verify(self):
+        try:
+            from binascii import hexlify
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.profiles import JCOP4_PROFILE
+            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.registry import find_aid
+
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+            session = open_session(conn, JCOP4_PROFILE)
+
+            instance_aid = bytes.fromhex("B00B5111CB01")
+            entry = find_aid(session, instance_aid)
+            if entry is not None:
+                self._respond("OK:GP_VERIFY:installed")
+            else:
+                self._respond("OK:GP_VERIFY:not_found")
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_VERIFY_FAIL:%s" % str(e))
