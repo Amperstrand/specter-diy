@@ -6,8 +6,10 @@ from .javacard.util import get_connection
 from platform import CriticalErrorWipeImmediately
 import platform
 from helpers import tagged_hash
-from gui.screens import Alert, Progress, Menu
+from gui.screens import Alert, Progress, Menu, Prompt
+from binascii import hexlify
 import asyncio
+import secp256k1
 
 
 class SeedKeeper(RAMKeyStore):
@@ -68,7 +70,7 @@ class SeedKeeper(RAMKeyStore):
                 return resp_data[4]
         except Exception:
             pass
-        return None
+        return 0
 
     @property
     def pin_attempts_max(self):
@@ -82,6 +84,24 @@ class SeedKeeper(RAMKeyStore):
     def is_ready(self):
         return self.connected and self._pin_unlocked and self.fingerprint is not None
 
+    def ping(self):
+        try:
+            self.applet.get_card_status()
+        except Exception:
+            self.connected = False
+
+    @property
+    def userkey(self):
+        if self._userkey is None:
+            card_key = self.applet.sc.card_pubkey
+            if card_key is not None:
+                pub_bytes = secp256k1.ec_pubkey_serialize(card_key)
+                card_key_bytes = pub_bytes
+            else:
+                card_key_bytes = b""
+            self._userkey = tagged_hash("userkey", self.secret + card_key_bytes)
+        return self._userkey
+
     def _unlock(self, pin):
         try:
             success, attempts = self.applet.verify_pin(pin)
@@ -93,11 +113,11 @@ class SeedKeeper(RAMKeyStore):
             err = str(e)
             if err == "9c02":  # wrong PIN
                 attempts = self.pin_attempts_left
-                if attempts is not None and attempts == 0:
+                if attempts == 0:
                     raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
                 raise PinError(
                     "Invalid PIN!\n%d of %d attempts left..."
-                    % (attempts or 0, self.pin_attempts_max)
+                    % (attempts, self.pin_attempts_max)
                 )
             elif err == "9c03":  # bricked
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
@@ -115,6 +135,12 @@ class SeedKeeper(RAMKeyStore):
 
     def lock(self):
         self._pin_unlocked = False
+        self.applet.sc.reset()
+        try:
+            self.connection.disconnect()
+        except Exception:
+            pass
+        self.connected = False
 
     async def check_card(self, check_pin=False):
         try:
@@ -129,6 +155,11 @@ class SeedKeeper(RAMKeyStore):
             )
             asyncio.create_task(self.wait_for_card(scr))
             await self.show(scr)
+
+        try:
+            self.ping()
+        except Exception:
+            pass
 
         if not self.connected:
             self.show_loader(title="Connecting to the card...")
@@ -188,12 +219,9 @@ class SeedKeeper(RAMKeyStore):
     async def unlock(self):
         await self.check_card(check_pin=False)
 
-        pin_attempts = self.pin_attempts_left
-
         while self.is_locked:
-            note = None
-            if pin_attempts is not None:
-                note = "%d PIN attempts remaining" % pin_attempts
+            pin_attempts = self.pin_attempts_left
+            note = "%d PIN attempts remaining" % pin_attempts
 
             pin = await self.get_pin(note=note)
             self.show_loader('Verifying PIN code...')
@@ -262,16 +290,26 @@ class SeedKeeper(RAMKeyStore):
     def is_key_saved(self):
         return self._is_key_saved
 
+    @property
+    def hexid(self):
+        card_key = self.applet.sc.card_pubkey
+        if card_key is not None:
+            pub_bytes = secp256k1.ec_pubkey_serialize(card_key)
+            return hexlify(tagged_hash("seedkeeper/pubkey", pub_bytes)[:4]).decode()
+        return "????????"
+
     async def storage_menu(self):
         enabled = self.connection.isCardInserted()
         buttons = [
             (None, "SeedKeeper storage"),
             (0, "Load key from SeedKeeper", enabled),
-            (1, "Card info", enabled),
+            (1, "Use a different card", enabled),
+            (2, "Card info", enabled),
         ]
 
         while True:
-            menuitem = await self.show(Menu(buttons, last=(255, None)))
+            note = "Card fingerprint: %s" % self.hexid
+            menuitem = await self.show(Menu(buttons, note=note, last=(255, None)))
             if menuitem == 255:
                 return False
             elif menuitem == 0:
@@ -281,6 +319,26 @@ class SeedKeeper(RAMKeyStore):
                 )
                 return True
             elif menuitem == 1:
+                if await self.show(
+                    Prompt(
+                        "Switching the card",
+                        "To use a different card you need "
+                        "to provide a PIN for current one first!\n\n"
+                        "Continue?"
+                    )
+                ):
+                    self.lock()
+                    self._userkey = None
+                    await self.show(
+                        Alert(
+                            "Please swap the card",
+                            "Now you can insert another card and set it up.",
+                            button_text="Continue"
+                        )
+                    )
+                    await self.check_card(check_pin=True)
+                    await self.unlock()
+            elif menuitem == 2:
                 await self.show_card_info()
             else:
                 raise KeyStoreError("Invalid menu")

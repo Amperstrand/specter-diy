@@ -55,6 +55,7 @@ class SatochipSecureChannel:
         self.mac_key = None
         self.iv_counter = 1
         self.is_initialized = False
+        self.card_pubkey = None
 
     def initiate(self, connection, cla=0xB0):
         """Perform ECDH key exchange via INS 0x81."""
@@ -88,9 +89,9 @@ class SatochipSecureChannel:
         coordx = bytes(resp_data[2:2 + coordx_size])
 
         card_pubkey_compressed = bytes([0x02]) + coordx
-        if hil_test_mode:
-            log("SC", "ECDH: computing shared secret...")
+
         card_pubkey = secp256k1.ec_pubkey_parse(card_pubkey_compressed)
+        self.card_pubkey = card_pubkey
 
         shared_point = secp256k1.ec_pubkey_parse(
             secp256k1.ec_pubkey_serialize(card_pubkey)
@@ -104,6 +105,13 @@ class SatochipSecureChannel:
         self.is_initialized = True
         if hil_test_mode:
             log("SC", "ECDH: secure channel initialized")
+
+    def reset(self):
+        self.aes_key = None
+        self.mac_key = None
+        self.iv_counter = 1
+        self.is_initialized = False
+        self.card_pubkey = None
 
     def encrypt_apdu(self, inner_apdu: bytes, cla=0xB0) -> bytes:
         if not self.is_initialized:
