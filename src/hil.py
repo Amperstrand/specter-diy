@@ -200,6 +200,11 @@ class HILCommandHandler:
             self._gp_verify()
             return
 
+        # TEST_GP_PROBE - non-destructive card probe
+        if line == "TEST_GP_PROBE":
+            self._gp_probe()
+            return
+
         # Fallback: try to parse as JSON (mirrors TCPGUI behavior)
         try:
             json.loads("[%s]" % line)
@@ -555,3 +560,19 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_VERIFY_FAIL:%s" % str(e))
+
+    def _gp_probe(self):
+        try:
+            from binascii import hexlify
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.probe import probe_card
+
+            conn = get_connection()
+            result = probe_card(conn)
+            kind = result["kind"]
+            atr = hexlify(result.get("atr", b"")).decode() if result.get("atr") else ""
+            mc = "mc=%d" % (1 if result.get("memorycard_installed") else 0)
+            self._respond("OK:GP_PROBE:%s,atr=%s,%s" % (kind, atr, mc))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_PROBE_FAIL:%s" % str(e))
