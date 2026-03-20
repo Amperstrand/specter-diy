@@ -180,6 +180,11 @@ class HILCommandHandler:
             self._gp_init()
             return
 
+        # TEST_GP_STATUS - list card registry via GP GET STATUS
+        if line == "TEST_GP_STATUS":
+            self._gp_status()
+            return
+
         # Fallback: try to parse as JSON (mirrors TCPGUI behavior)
         try:
             json.loads("[%s]" % line)
@@ -438,3 +443,21 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_INIT_FAIL:%s" % str(e))
+
+    def _gp_status(self):
+        try:
+            from binascii import hexlify
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.profiles import JCOP4_PROFILE
+            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.registry import list_all, format_registry
+
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+            session = open_session(conn, JCOP4_PROFILE)
+            registry = list_all(session)
+            text = format_registry(registry)
+            self._respond("OK:GP_STATUS:%s" % text)
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_STATUS_FAIL:%s" % str(e))
