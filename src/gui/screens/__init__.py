@@ -9,3 +9,4 @@ from .mnemonic import MnemonicScreen, NewMnemonicScreen, RecoverMnemonicScreen
 from .transaction import TransactionScreen
 from .settings import DevSettings
 from .debug_info import DebugInfoScreen
+from .provisioning import ProvisioningProgressScreen, ProvisioningDetailsScreen

@@ -60,6 +60,188 @@ class Specter:
         self.dev = False
         self.apps = apps
 
+    async def _check_provisioning(self):
+        """Check if a GP card needs MemoryCard provisioning after unlock."""
+        try:
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.probe import probe_card
+            conn = get_connection()
+            result = probe_card(conn)
+            if result["kind"] == "gp_installable":
+                if await self.gui.prompt(
+                    "Supported JavaCard detected",
+                    "Specter MemoryCard is not installed.\n\n"
+                    "Installing will modify the card.\n\n"
+                    "Install now?",
+                ):
+                    await self._install_memorycard(result)
+        except Exception:
+            pass
+
+    async def _install_memorycard(self, probe_result):
+        """Run the MemoryCard installation flow with progress screen."""
+        from gui.screens.provisioning import ProvisioningProgressScreen
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
+        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.loader import install_memorycard, verify_install
+        from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
+        import hashlib
+
+        scr = ProvisioningProgressScreen("Install MemoryCard")
+        await self.gui.load_screen(scr)
+
+        try:
+            scr.set_step("Connecting to card...")
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+
+            scr.set_step("Authenticating...")
+            session = open_session(conn, JCOP4_PROFILE)
+
+            scr.set_step("Verifying CAP file...")
+            sha = hashlib.sha256(CAP_DATA).hexdigest()
+            if sha != CAP_SHA256:
+                scr.set_error("CAP hash mismatch!\n%s" % sha)
+                await scr.result()
+                return
+
+            scr.set_step("Loading package...")
+            scr.set_detail("Sending %d bytes..." % len(CAP_DATA))
+            package_aid = bytes.fromhex("B00B5111CB")
+            applet_aid = bytes.fromhex("B00B5111CB01")
+            instance_aid = bytes.fromhex("B00B5111CB01")
+            sd_aid = JCOP4_PROFILE["isd_aid"]
+            privileges = JCOP4_PROFILE["privileges"]
+
+            install_memorycard(
+                session, CAP_DATA, package_aid, applet_aid,
+                instance_aid, sd_aid, privileges)
+
+            scr.set_step("Verifying installation...")
+            if verify_install(session, instance_aid):
+                scr.set_done()
+            else:
+                scr.set_error("Verification failed!")
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            await scr.result()
+        except Exception as e:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            scr.set_error("Install failed:\n%s" % str(e))
+            await scr.result()
+
+    async def _provisioning_menu(self):
+        """Developer provisioning menu: install, delete, diagnostics."""
+        buttons = [
+            (1, "Card info"),
+            (2, "Install MemoryCard"),
+            (3, "Delete MemoryCard"),
+        ]
+        while True:
+            menuitem = await self.gui.menu(
+                buttons, title="JavaCard Provisioning",
+                note=self._firmware_note(), last=(255, None))
+            if menuitem == 255:
+                return
+            elif menuitem == 1:
+                await self._show_card_details()
+            elif menuitem == 2:
+                from keystore.javacard.gp.probe import probe_card
+                from keystore.javacard.util import get_connection
+                conn = get_connection()
+                result = probe_card(conn)
+                await self._install_memorycard(result)
+            elif menuitem == 3:
+                await self._delete_memorycard()
+
+    async def _show_card_details(self):
+        """Show card probe results and registry dump."""
+        from gui.screens.provisioning import ProvisioningDetailsScreen
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.gp.probe import probe_card
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
+        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.registry import list_all, format_registry
+
+        conn = get_connection()
+        result = probe_card(conn)
+        scr = ProvisioningDetailsScreen(result)
+        await self.gui.load_screen(scr)
+
+        if result.get("profile"):
+            try:
+                conn.connect(conn.T1_protocol)
+                session = open_session(conn, result["profile"])
+                registry = list_all(session)
+                scr.set_registry(format_registry(registry))
+                try:
+                    conn.disconnect()
+                except Exception:
+                    pass
+            except Exception:
+                scr.set_registry("(failed to query registry)")
+
+        await scr.result()
+
+    async def _delete_memorycard(self):
+        """Delete MemoryCard applet from card."""
+        if not await self.gui.prompt(
+            "Delete MemoryCard?",
+            "This will remove the MemoryCard applet\n"
+            "and all its data from the card.\n\n"
+            "Are you sure?",
+            warning="This action cannot be undone!",
+        ):
+            return
+
+        from gui.screens.provisioning import ProvisioningProgressScreen
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
+        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.deleter import delete_aid
+
+        scr = ProvisioningProgressScreen("Delete MemoryCard")
+        await self.gui.load_screen(scr)
+
+        try:
+            scr.set_step("Connecting to card...")
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+
+            scr.set_step("Authenticating...")
+            session = open_session(conn, JCOP4_PROFILE)
+
+            scr.set_step("Deleting applet...")
+            applet_aid = bytes.fromhex("B00B5111CB01")
+            delete_aid(session, applet_aid)
+
+            scr.set_step("Deleting package...")
+            package_aid = bytes.fromhex("B00B5111CB")
+            try:
+                delete_aid(session, package_aid)
+            except Exception:
+                pass
+
+            scr.set_done()
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            await scr.result()
+        except Exception as e:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            scr.set_error("Delete failed:\n%s" % str(e))
+            await scr.result()
+
     def _firmware_note(self, include_details=False):
         primary_note = "Firmware version %s" % get_version()
 
@@ -220,6 +402,8 @@ class Specter:
             await self.keystore.init(self.gui.show_screen(), self.gui.show_loader)
             # unlock with PIN or set up the PIN code
             await self.unlock()
+            # GP provisioning: check if card needs MemoryCard install
+            await self._check_provisioning()
             # initialize apps if keystore loaded a key during unlock
             # (needed for keystores like SeedKeeper that auto-load mnemonic)
             if self.keystore.fingerprint is not None:
@@ -663,6 +847,7 @@ class Specter:
         if hasattr(self.keystore, "lock"):
             buttons.extend([(777, "Change PIN code")])
         buttons += [
+            (888, "JavaCard Provisioning"),
             (456, "Reboot"),
             (123, "Wipe the device", True, 0x951E2D),
         ]
@@ -701,6 +886,9 @@ class Specter:
                 return
             elif menuitem == 1:
                 await self.communication_settings()
+            elif menuitem == 888:
+                await self._provisioning_menu()
+                return
             else:
                 print(menuitem)
                 raise SpecterError("Not implemented")
