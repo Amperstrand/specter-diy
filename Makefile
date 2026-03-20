@@ -128,6 +128,6 @@ hilflash: hil
 	st-flash --connect-under-reset write $(TARGET_DIR)/specter-diy.bin 0x08000000
 
 hiltest:
-	cd test/integration && python3 hardwareintheloop.py
+	.venv/bin/python3 test/integration/hardwareintheloop.py
 
 .PHONY: hil hilflash hiltest

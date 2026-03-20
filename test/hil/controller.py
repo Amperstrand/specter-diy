@@ -156,6 +156,16 @@ class SerialSocket:
             expected_prefix = b"OK:KEYSTORE"
         elif cmd.startswith("TEST_FINGERPRINT"):
             expected_prefix = b"OK:FINGERPRINT"
+        elif cmd.startswith("TEST_IMPORT_SECRET"):
+            expected_prefix = b"OK:IMPORT"
+        elif cmd.startswith("TEST_DELETE_SECRET"):
+            expected_prefix = b"OK:DELETED"
+        elif cmd.startswith("TEST_CARD_RESET"):
+            expected_prefix = b"OK:CARD_RESET"
+        elif cmd.startswith("TEST_SECRETS"):
+            expected_prefix = b"OK:SECRETS"
+        elif cmd.startswith("TEST_ALL_SECRETS"):
+            expected_prefix = b"OK:ALL_SECRETS"
         return self.read_response(timeout=timeout, expected_prefix=expected_prefix)
 
     def send(self, cmd):
@@ -312,6 +322,119 @@ class HardwareController:
         print("Keystore detection timed out, defaulting to internal")
         return "internal"
 
+    def _load_seedkeeper(self):
+        """Load mnemonic from SeedKeeper card via HIL."""
+        self._send_with_retry("1234", "PIN entry", require_change=False)
+        time.sleep(1)
+        for i in range(30):
+            resp = self.gui.command("TEST_SCREEN", timeout=2)
+            if b"OK:SCREEN:Menu:" in resp:
+                if b"Select secret" in resp:
+                    self._select_secret_by_label("abandon")
+                    time.sleep(3)
+                    resp = self.gui.command("TEST_SCREEN", timeout=2)
+                    if b"OK:SCREEN:Menu:" in resp and b"Select secret" not in resp:
+                        print("  Reached main menu (SeedKeeper)")
+                        return
+                    continue
+                if b"What do you want to do" in resp:
+                    print("  No secrets on card, importing abandon mnemonic...")
+                    self.card_import_bip39("abandon " * 11 + "about", label="abandon")
+                    print("  Resetting device to load imported secret...")
+                    self.gui.command("TEST_RESET", timeout=5)
+                    time.sleep(4)
+                    self.gui._reopen()
+                    for j in range(30):
+                        r = self.gui.status()
+                        if b"OK:READY" in r:
+                            break
+                        time.sleep(0.5)
+                    print("  Re-entering _load_seedkeeper after import...")
+                    return self._load_seedkeeper()
+                print("  Reached main menu (SeedKeeper)")
+                return
+            elif b"OK:SCREEN:Alert:" in resp:
+                self.gui.send(True)
+                time.sleep(0.5)
+            time.sleep(0.3)
+        raise RuntimeError("Did not reach main menu after SeedKeeper PIN")
+
+    def _select_secret_by_label(self, label):
+        """Select a BIP39 secret by label via TEST_SECRETS command."""
+        resp = self.gui.command("TEST_SECRETS", timeout=5)
+        if b"OK:SECRETS:" not in resp:
+            self.gui.send(1)
+            return
+        parts = resp.split(b"OK:SECRETS:")[1].strip().split(b",")
+        target_id = None
+        for part in parts:
+            fields = part.decode().split(":")
+            if len(fields) >= 2 and fields[1] == label:
+                target_id = int(fields[0])
+                break
+        if target_id is None:
+            target_id = int(parts[0].decode().split(":")[0])
+        print(f"  Selecting secret: {label} (id={target_id})")
+        self.gui.send(target_id)
+
+    def card_import_bip39(self, mnemonic, label=""):
+        """Import a BIP39 mnemonic to the SeedKeeper card via HIL.
+
+        Converts mnemonic to entropy, sends TEST_IMPORT_SECRET command.
+        Returns (secret_id, fingerprint_hex) tuple.
+        """
+        import embit
+        from binascii import hexlify
+        from embit import bip39
+        entropy = bip39.mnemonic_to_bytes(mnemonic)
+        entropy_len = len(entropy)
+        secret_data = bytes([entropy_len >> 8, entropy_len & 0xFF]) + entropy
+        hex_data = hexlify(secret_data).decode()
+        cmd = "TEST_IMPORT_SECRET:%s" % hex_data
+        if label:
+            cmd += ":%s" % label
+        resp = self.gui.command(cmd, timeout=10)
+        prefix = b"OK:IMPORT:"
+        if prefix not in resp:
+            raise RuntimeError("Import failed: %s" % resp)
+        parts = resp.split(prefix, 1)[1].strip().split(b":")
+        sid = int(parts[0])
+        fp = parts[1].decode()
+        print(f"  Imported secret: id={sid}, fingerprint={fp}")
+        return sid, fp
+
+    def card_delete_secret(self, sid):
+        """Delete a secret from the SeedKeeper card by ID."""
+        resp = self.gui.command("TEST_DELETE_SECRET:%d" % sid, timeout=5)
+        prefix = b"OK:DELETED:"
+        if prefix not in resp:
+            raise RuntimeError("Delete failed: %s" % resp)
+        print(f"  Deleted secret: id={sid}")
+        return True
+
+    def card_delete_all_secrets(self):
+        """Delete all BIP39 secrets from the card."""
+        resp = self.gui.command("TEST_ALL_SECRETS", timeout=5)
+        if b"OK:ALL_SECRETS:" not in resp:
+            print("  No secrets to delete")
+            return
+        parts = resp.split(b"OK:ALL_SECRETS:")[1].strip().split(b",")
+        bip39_types = (0x10, 0x30, 0x31)
+        for part in parts:
+            fields = part.decode().split(":")
+            sid = int(fields[0])
+            tname = fields[1]
+            try:
+                tval = int(tname, 16) if tname.startswith("0x") else 0
+            except ValueError:
+                tval = 0
+            is_bip39 = tval in bip39_types
+            if tname in ("MASTERSEED", "BIP39", "BIP39v2"):
+                is_bip39 = True
+            if is_bip39:
+                self.card_delete_secret(sid)
+        print("  All BIP39 secrets deleted")
+
     @staticmethod
     def _find_stlink_uart():
         matches = sorted(glob.glob("/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_*-if02"))
@@ -460,7 +583,13 @@ class HardwareController:
         else:
             raise RuntimeError("Device not ready after wipe")
 
-        self._load_internal_flash()
+        self.keystore_type = self._detect_keystore(timeout=30)
+        print("Detected keystore: %s" % self.keystore_type)
+
+        if self.keystore_type.lower() == "seedkeeper":
+            self._load_seedkeeper()
+        else:
+            self._load_internal_flash()
         self._wait_for_usb_vcp()
 
     def shutdown(self):
