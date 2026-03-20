@@ -185,6 +185,11 @@ class HILCommandHandler:
             self._gp_status()
             return
 
+        # TEST_GP_DELETE:<hex_aid> - delete AID from card
+        if line.startswith("TEST_GP_DELETE:"):
+            self._gp_delete(line[len("TEST_GP_DELETE:"):])
+            return
+
         # Fallback: try to parse as JSON (mirrors TCPGUI behavior)
         try:
             json.loads("[%s]" % line)
@@ -461,3 +466,22 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_STATUS_FAIL:%s" % str(e))
+
+    def _gp_delete(self, hex_aid):
+        try:
+            from binascii import unhexlify, hexlify
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.profiles import JCOP4_PROFILE
+            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.deleter import delete_aid
+            from keystore.javacard.gp.registry import find_aid
+
+            aid = unhexlify(hex_aid.strip())
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+            session = open_session(conn, JCOP4_PROFILE)
+            delete_aid(session, aid)
+            self._respond("OK:GP_DELETED:%s" % hex_aid.strip())
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_DELETE_FAIL:%s" % str(e))
