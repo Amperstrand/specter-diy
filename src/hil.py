@@ -175,6 +175,11 @@ class HILCommandHandler:
             self._get_mnemonic()
             return
 
+        # TEST_GP_INIT - open SCP03 session with card
+        if line == "TEST_GP_INIT":
+            self._gp_init()
+            return
+
         # Fallback: try to parse as JSON (mirrors TCPGUI behavior)
         try:
             json.loads("[%s]" % line)
@@ -411,3 +416,25 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:CARD_RESET_FAIL:%s" % str(e))
+
+    def _gp_init(self):
+        try:
+            from binascii import hexlify
+            from keystore.javacard.util import get_connection
+            from keystore.javacard.gp.profiles import JCOP4_PROFILE
+            from keystore.javacard.gp.scp03 import open_session
+
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+
+            session = open_session(conn, JCOP4_PROFILE)
+            parts = [
+                "SCP03",
+                "kvi=%d" % JCOP4_PROFILE["key_version"],
+                "rmac=%d" % (1 if session.rmac_supported else 0),
+                "renc=%d" % (1 if session.renc_supported else 0),
+            ]
+            self._respond("OK:GP_INIT:%s" % ",".join(parts))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:GP_INIT_FAIL:%s" % str(e))
