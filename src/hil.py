@@ -140,6 +140,16 @@ class HILCommandHandler:
             self._wipe_storage()
             return
 
+        # TEST_SECRETS - list BIP39 secret IDs and labels from SeedKeeper
+        if line == "TEST_SECRETS":
+            self._list_secrets()
+            return
+
+        # TEST_ALL_SECRETS - list ALL secrets (including descriptors, passwords, etc.)
+        if line == "TEST_ALL_SECRETS":
+            self._list_all_secrets()
+            return
+
         # TEST_FINGERPRINT - get current keystore fingerprint
         if line == "TEST_FINGERPRINT":
             self._get_fingerprint()
@@ -284,3 +294,52 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:MNEMONIC_FAIL")
+
+    def _list_secrets(self):
+        try:
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            headers = ks.applet.list_secret_headers()
+            bip39 = [
+                h for h in headers
+                if h['type'] in (0x10, 0x30, 0x31)
+                and (h['type'] != 0x10 or h.get('subtype') == 1)
+            ]
+            parts = []
+            for h in bip39:
+                label = h.get('label', '')
+                if not isinstance(label, str) or len(label) == 0:
+                    label = 'Secret #%d' % h['id']
+                fp = h.get('fingerprint', '????????')
+                parts.append("%d:%s:%s" % (h['id'], label, fp))
+            self._respond("OK:SECRETS:%s" % ",".join(parts))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:SECRETS_FAIL")
+
+    def _list_all_secrets(self):
+        try:
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            headers = ks.applet.list_secret_headers()
+            type_names = {
+                0x10: "MASTERSEED", 0x30: "BIP39", 0x31: "BIP39v2",
+                0x40: "ELECTRUM", 0x90: "PASSWORD", 0xC0: "DATA",
+                0xC1: "DESCRIPTOR",
+            }
+            parts = []
+            for h in headers:
+                label = h.get('label', '')
+                if not isinstance(label, str) or len(label) == 0:
+                    label = 'Secret #%d' % h['id']
+                tname = type_names.get(h['type'], "0x%02x" % h['type'])
+                fp = h.get('fingerprint', '????????')
+                parts.append("%d:%s:%s:%s" % (h['id'], tname, label, fp))
+            self._respond("OK:ALL_SECRETS:%s" % ",".join(parts))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:ALL_SECRETS_FAIL")

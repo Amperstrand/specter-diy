@@ -312,6 +312,42 @@ class HardwareController:
         print("Keystore detection timed out, defaulting to internal")
         return "internal"
 
+    def _load_seedkeeper(self):
+        """Load mnemonic from SeedKeeper card via HIL."""
+        self._send_with_retry("1234", "PIN entry", require_change=True)
+        for i in range(30):
+            resp = self.gui.command("TEST_SCREEN", timeout=2)
+            if b"OK:SCREEN:Menu:" in resp:
+                if b"Select secret" in resp:
+                    self._select_secret_by_label("abandon")
+                    time.sleep(3)
+                    continue
+                print("  Reached main menu (SeedKeeper)")
+                return
+            elif b"OK:SCREEN:Alert:" in resp:
+                self.gui.send(True)
+                time.sleep(0.5)
+            time.sleep(0.3)
+        raise RuntimeError("Did not reach main menu after SeedKeeper PIN")
+
+    def _select_secret_by_label(self, label):
+        """Select a BIP39 secret by label via TEST_SECRETS command."""
+        resp = self.gui.command("TEST_SECRETS", timeout=5)
+        if b"OK:SECRETS:" not in resp:
+            self.gui.send(1)
+            return
+        parts = resp.split(b"OK:SECRETS:")[1].strip().split(b",")
+        target_id = None
+        for part in parts:
+            fields = part.decode().split(":")
+            if len(fields) >= 2 and fields[1] == label:
+                target_id = int(fields[0])
+                break
+        if target_id is None:
+            target_id = int(parts[0].decode().split(":")[0])
+        print(f"  Selecting secret: {label} (id={target_id})")
+        self.gui.send(target_id)
+
     @staticmethod
     def _find_stlink_uart():
         matches = sorted(glob.glob("/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_*-if02"))
@@ -460,7 +496,13 @@ class HardwareController:
         else:
             raise RuntimeError("Device not ready after wipe")
 
-        self._load_internal_flash()
+        self.keystore_type = self._detect_keystore(timeout=30)
+        print("Detected keystore: %s" % self.keystore_type)
+
+        if self.keystore_type == "seedkeeper":
+            self._load_seedkeeper()
+        else:
+            self._load_internal_flash()
         self._wait_for_usb_vcp()
 
     def shutdown(self):

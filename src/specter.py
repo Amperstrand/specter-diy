@@ -24,6 +24,7 @@ from embit import bip39
 from embit.liquid.networks import NETWORKS
 from gui.screens.settings import HostSettings
 from gui.screens.mnemonic import MnemonicPrompt
+from gui.screens.debug_info import DebugInfoScreen
 
 # small helper functions
 from helpers import gen_mnemonic, fix_mnemonic
@@ -162,15 +163,34 @@ class Specter:
             return
         # checking the first available keystore
         keystore_cls = None
-        # TODO: show some screen here if none are available
+        # show debug info screen if multiple keystores (e.g. MemoryCard + SeedKeeper)
+        debug_screen = None
+        connection = None
+        for ks in self.keystores:
+            if hasattr(ks, 'connection'):
+                connection = ks.connection
+                break
+        poll_count = 0
         while keystore_cls is None:
             for keystore in self.keystores:
                 if keystore.is_available():
                     keystore_cls = keystore
                     break
-            # if none are available just wait for it
-            # if keystore_cls is None:
-            #     await asyncio.sleep_ms(50)
+            if keystore_cls is None:
+                # show debug screen on first iteration and every ~5s
+                if debug_screen is None and connection is not None:
+                    from keystore.javacard.card_scanner import scan_card_applets
+                    debug_screen = DebugInfoScreen()
+                    debug_screen.load()
+                if debug_screen is not None and poll_count % 100 == 0:
+                    from keystore.javacard.card_scanner import scan_card_applets
+                    try:
+                        info = scan_card_applets(connection)
+                        debug_screen.update_info(info)
+                    except Exception:
+                        pass
+                await asyncio.sleep_ms(50)
+                poll_count += 1
         self.keystore = keystore_cls()
         self._hil_set_keystore_ref(keystore_cls)
 
@@ -200,7 +220,15 @@ class Specter:
             await self.keystore.init(self.gui.show_screen(), self.gui.show_loader)
             # unlock with PIN or set up the PIN code
             await self.unlock()
+            # initialize apps if keystore loaded a key during unlock
+            # (needed for keystores like SeedKeeper that auto-load mnemonic)
+            if self.keystore.fingerprint is not None:
+                self.init_apps()
+                self.current_menu = self.mainmenu
         except Exception as e:
+            if hil_test_mode:
+                from debug_trace import log_exception
+                log_exception("SETUP", e)
             next_fn = await self.handle_exception(e, self.setup)
             await next_fn()
 
