@@ -11,6 +11,10 @@ from unittest import TestCase, skipUnless
 from util.controller import sim
 
 
+MNEMONIC_ABANDON = "abandon " * 11 + "about"
+MNEMONIC_BACON = "bacon " * 11 + "about"
+
+
 def has_seedkeeper():
     return hasattr(sim, 'keystore_type') and sim.keystore_type.lower() == "seedkeeper"
 
@@ -53,3 +57,68 @@ class SeedKeeperTest(TestCase):
         resp = sim.gui.command("TEST_ALL_SECRETS", timeout=5)
         self.assertIn(b"OK:ALL_SECRETS", resp,
                       "TEST_ALL_SECRETS should return OK:ALL_SECRETS, got: %s" % repr(resp))
+
+    def test_import_bacon_secret(self):
+        """Import 'bacon' mnemonic and verify it appears on the card."""
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        secrets_part = resp.decode().split("OK:SECRETS:")[1] if "OK:SECRETS:" in resp.decode() else ""
+        for entry in secrets_part.split(","):
+            fields = entry.strip().split(":")
+            if len(fields) >= 2 and fields[1] == "bacon":
+                self.skipTest("'bacon' secret already exists on card")
+
+        sid, fp = sim.card_import_bip39(MNEMONIC_BACON, label="bacon")
+        self.assertEqual(len(fp), 8, "fingerprint should be 8 hex chars")
+        int(fp, 16)
+
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        self.assertIn(b"bacon", resp, "'bacon' secret should appear after import")
+
+    def test_delete_and_restore_secret(self):
+        """Delete the 'abandon' secret, verify it's gone, then restore it."""
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        self.assertIn(b"OK:SECRETS", resp)
+
+        resp_str = resp.decode()
+        secrets_part = resp_str.split("OK:SECRETS:")[1] if "OK:SECRETS:" in resp_str else ""
+        abandon_id = None
+        if secrets_part.strip():
+            for entry in secrets_part.split(","):
+                fields = entry.strip().split(":")
+                if len(fields) >= 2 and fields[1] == "abandon":
+                    abandon_id = int(fields[0])
+                    break
+
+        if abandon_id is None:
+            self.skipTest("'abandon' secret not found on card")
+
+        sim.card_delete_secret(abandon_id)
+
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        secrets_part = resp.decode().split("OK:SECRETS:")[1] if "OK:SECRETS:" in resp.decode() else ""
+        for entry in secrets_part.split(","):
+            fields = entry.strip().split(":")
+            if len(fields) >= 1:
+                self.assertNotEqual(int(fields[0]), abandon_id,
+                                    "deleted secret should not appear in list")
+
+        sid, fp = sim.card_import_bip39(MNEMONIC_ABANDON, label="abandon")
+        self.assertEqual(len(fp), 8, "restored secret should have valid fingerprint")
+
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        self.assertIn(b"abandon", resp, "'abandon' secret should be restored")
+
+    def test_delete_all_and_restore(self):
+        """Delete all BIP39 secrets, verify card is empty, then restore abandon.
+        Runs last to avoid destroying card state for other tests.
+        """
+        sim.card_delete_all_secrets()
+
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        secrets_part = resp.decode().split("OK:SECRETS:")[1] if "OK:SECRETS:" in resp.decode() else ""
+        self.assertEqual(secrets_part.strip(), "",
+                         "all BIP39 secrets should be deleted")
+
+        sim.card_import_bip39(MNEMONIC_ABANDON, label="abandon")
+        resp = sim.gui.command("TEST_SECRETS", timeout=5)
+        self.assertIn(b"abandon", resp, "'abandon' secret should be restored")

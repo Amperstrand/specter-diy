@@ -339,6 +339,8 @@ class Specter:
         if self.keystore.is_key_saved and self.keystore.load_button:
             buttons.append((2, self.keystore.load_button))
         buttons += [(None, "Settings"), (3, "Device settings")]
+        if self.keystore.storage_button is not None:
+            buttons.append((4, self.keystore.storage_button))
         # wait for menu selection
         menuitem = await self.gui.menu(buttons)
 
@@ -366,6 +368,11 @@ class Specter:
             return self.mainmenu
         elif menuitem == 3:
             await self.update_devsettings()
+        elif menuitem == 4:
+            res = await self.keystore.storage_menu()
+            if res:
+                self.init_apps()
+                return self.mainmenu
         elif menuitem == 777:
             return await self.import_mnemonic()
         # lock device

@@ -20,6 +20,7 @@ class SeedKeeperApplet(Applet):
     INS_VERIFY_PIN = 0x42
     INS_CHANGE_PIN = 0x44
     INS_CARD_LABEL = 0x3D
+    INS_IMPORT_SECRET = 0xA1
     INS_EXPORT_SECRET = 0xA2
     INS_LIST_SECRETS = 0xA6
     INS_GET_STATUS = 0xA7
@@ -167,6 +168,62 @@ class SeedKeeperApplet(Applet):
         sid_bytes = bytes([(sid >> 8) & 0xFF, sid & 0xFF])
         apdu = bytes([self.CLA, self.INS_DELETE_SECRET, 0x00, 0x00, 0x02]) + sid_bytes
         self.secure_request(apdu)
+
+    def import_secret(self, secret_data, secret_type=0x30, label=""):
+        """Import a secret to the card using plaintext transport.
+
+        Multi-step INIT/PROCESS/FINALIZE protocol.
+        For BIP39: secret_data = entropy_len(2) || entropy bytes.
+
+        Returns: (secret_id, fingerprint_hex) tuple.
+        """
+        if isinstance(label, str):
+            label_bytes = label.encode("utf-8")
+        else:
+            label_bytes = bytes(label)
+        if len(label_bytes) > 127:
+            raise AppletException("Label too long (max 127 bytes)")
+
+        secret_len = len(secret_data)
+        padded_size = secret_len + (16 - secret_len % 16) % 16
+
+        header = bytes([
+            secret_type,
+            0x01,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00,
+            0x00,
+            len(label_bytes),
+        ])
+
+        init_data = header + label_bytes + bytes([padded_size >> 8, padded_size & 0xFF])
+        init_apdu = bytes([self.CLA, self.INS_IMPORT_SECRET, 0x01, 0x01, len(init_data)]) + init_data
+        resp = self.secure_request(init_apdu)
+
+        chunk_size = 128
+        offset = 0
+        while offset < secret_len:
+            remaining = secret_len - offset
+            size = min(chunk_size, remaining)
+            is_last = (offset + size >= secret_len)
+            p2 = 0x03 if is_last else 0x02
+            chunk = secret_data[offset:offset + size]
+            chunk_apdu = bytes([
+                self.CLA, self.INS_IMPORT_SECRET, 0x01, p2,
+                2 + len(chunk)
+            ]) + bytes([size >> 8, size & 0xFF]) + chunk
+            resp = self.secure_request(chunk_apdu)
+            offset += size
+
+        if len(resp) >= 6:
+            sid = (resp[0] << 8) | resp[1]
+            fp = hexlify(bytes(resp[2:6])).decode()
+            return sid, fp
+        raise AppletException("Import failed: unexpected response")
 
     def _parse_header(self, data):
         """Parse a 15+ byte secret header.

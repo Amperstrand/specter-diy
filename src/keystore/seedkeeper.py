@@ -107,19 +107,20 @@ class SeedKeeper(RAMKeyStore):
             success, attempts = self.applet.verify_pin(pin)
             if success:
                 self._pin_unlocked = True
+                self._last_pin = pin
                 self.enc_secret = tagged_hash('enc', self.secret)
                 return
         except Exception as e:
             err = str(e)
-            if err == "9c02":  # wrong PIN
-                attempts = self.pin_attempts_left
+            if err.startswith("63c") and len(err) == 4:
+                attempts = int(err[3], 16)
                 if attempts == 0:
                     raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
                 raise PinError(
                     "Invalid PIN!\n%d of %d attempts left..."
                     % (attempts, self.pin_attempts_max)
                 )
-            elif err == "9c03":  # bricked
+            elif err == "9c03":
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             else:
                 raise e
@@ -232,12 +233,23 @@ class SeedKeeper(RAMKeyStore):
                 pin_attempts = self.pin_attempts_left
                 continue
 
-        selected = await self._select_bip39_secret()
-        self.selected_secret_id = selected['id']
-        self.show_loader('Loading mnemonic from card...')
-        mnemonic = self.applet.get_bip39_secret(selected['id'], selected['type'])
-        self.set_mnemonic(mnemonic, "")
-        self._is_key_saved = True
+        try:
+            selected = await self._select_bip39_secret()
+            self.selected_secret_id = selected['id']
+            self.show_loader('Loading mnemonic from card...')
+            mnemonic = self.applet.get_bip39_secret(selected['id'], selected['type'])
+            self.set_mnemonic(mnemonic, "")
+            self._is_key_saved = True
+        except KeyStoreError as e:
+            if "No BIP39 secrets" in str(e):
+                await self.show(Alert(
+                    'No secrets',
+                    'No BIP39 secrets found on the card.\n'
+                    'Go to Settings > SeedKeeper storage\n'
+                    'to import a secret.'
+                ))
+                return
+            raise
 
     async def _select_bip39_secret(self):
         """List BIP39 secrets on card, let user select if multiple.
