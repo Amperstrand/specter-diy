@@ -4,6 +4,10 @@ All-AES secure channel: AES-128 for key derivation (AES-CMAC-KDF),
 AES-128-CBC for encryption, AES-CMAC for message authentication.
 
 Reference: kaoh/globalplatform/src/crypto.c, OpenJavaCard SCP03Derivation.java
+
+WARNING: This SCP03 implementation has NOT been tested on hardware.
+Only SCP02 is currently verified (19/19 hardware tests, 54/54 CI tests).
+See GitHub issue #26 for SCP03 testing roadmap and how to contribute.
 """
 
 from ucryptolib import aes as _aes

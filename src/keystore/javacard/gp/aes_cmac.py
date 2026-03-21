@@ -1,6 +1,8 @@
 """AES-CMAC (NIST SP 800-38B) implementation.
 
 Pure Python using ucryptolib AES-128-ECB. Used by SCP03 for secure messaging MAC.
+
+WARNING: Not tested on hardware. Only SCP02 is currently verified.
 """
 
 from ucryptolib import aes as _aes
