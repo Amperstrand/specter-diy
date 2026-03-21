@@ -190,14 +190,20 @@ class HILCommandHandler:
             self._gp_delete(line[len("TEST_GP_DELETE:"):])
             return
 
-        # TEST_GP_INSTALL - install MemoryCard applet
-        if line == "TEST_GP_INSTALL":
-            self._gp_install()
+        # TEST_GP_INSTALL[:<path>] - install applet from DGP file
+        if line.startswith("TEST_GP_INSTALL"):
+            arg = line[len("TEST_GP_INSTALL"):].strip()
+            if arg.startswith(":"):
+                arg = arg[1:]
+            self._gp_install(arg if arg else None)
             return
 
-        # TEST_GP_VERIFY - verify MemoryCard is installed
-        if line == "TEST_GP_VERIFY":
-            self._gp_verify()
+        # TEST_GP_VERIFY[:<hex_aid>] - verify AID is installed
+        if line.startswith("TEST_GP_VERIFY"):
+            arg = line[len("TEST_GP_VERIFY"):].strip()
+            if arg.startswith(":"):
+                arg = arg[1:]
+            self._gp_verify(arg if arg else None)
             return
 
         # TEST_GP_PROBE - non-destructive card probe
@@ -505,58 +511,65 @@ class HILCommandHandler:
             log_exception("HIL", e)
             self._respond("ERR:GP_DELETE_FAIL:%s" % str(e))
 
-    def _gp_install(self):
+    def _gp_install(self, path=None):
         try:
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
-            from keystore.javacard.gp.scp03 import open_session
-            from keystore.javacard.gp.loader import install_applet, verify_install
-            from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
-            from binascii import unhexlify
-            import hashlib
+            from keystore.javacard.gp.scp02 import open_session
+            from keystore.javacard.gp.loader import (
+                install_from_dgp, extract_package_aid, verify_install,
+            )
+            from binascii import hexlify as _h
 
-            sha = hashlib.sha256(CAP_DATA).hexdigest()
-            if sha != CAP_SHA256:
-                self._respond("ERR:GP_INSTALL_FAIL:CAP hash mismatch")
+            default_path = "/flash/gp/TeapotApplet.dgp"
+            filepath = path if path else default_path
+
+            try:
+                f = open(filepath, "rb")
+                dgp_data = f.read()
+                f.close()
+            except Exception:
+                self._respond("ERR:GP_INSTALL_FAIL:file not found: %s" % filepath)
                 return
+
+            pkg_aid = extract_package_aid(dgp_data)
+            pkg_aid_hex = _h(pkg_aid).decode()
+            self._respond("OK:GP_INSTALL:loading pkg=%s size=%d" % (
+                pkg_aid_hex, len(dgp_data)))
 
             conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
-
-            package_aid = unhexlify("B00B5111CB")
-            applet_aid = unhexlify("B00B5111CB01")
-            instance_aid = unhexlify("B00B5111CB01")
             sd_aid = JCOP4_PROFILE["isd_aid"]
-            privileges = JCOP4_PROFILE["privileges"]
 
-            self._respond("OK:GP_INSTALL:loading")
-            install_applet(
-                session, CAP_DATA, package_aid, applet_aid,
-                instance_aid, sd_aid)
+            installed = install_from_dgp(session, dgp_data, sd_aid)
 
+            instance_aid = installed + b"\x01"
             if verify_install(session, instance_aid):
-                self._respond("OK:GP_INSTALL:success")
+                self._respond("OK:GP_INSTALL:success %s" % _h(installed).decode())
             else:
                 self._respond("ERR:GP_INSTALL_FAIL:verify failed")
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_INSTALL_FAIL:%s" % str(e))
 
-    def _gp_verify(self):
+    def _gp_verify(self, hex_aid=None):
         try:
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
-            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.scp02 import open_session
             from keystore.javacard.gp.registry import find_aid
-            from binascii import unhexlify
+            from binascii import unhexlify, hexlify as _h
 
             conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
 
-            instance_aid = unhexlify("B00B5111CB01")
+            if hex_aid:
+                instance_aid = unhexlify(hex_aid.strip())
+            else:
+                instance_aid = unhexlify("B00B5111CB01")
             entry = find_aid(session, instance_aid)
             if entry is not None:
-                self._respond("OK:GP_VERIFY:installed")
+                self._respond("OK:GP_VERIFY:installed %s" % _h(instance_aid).decode())
             else:
-                self._respond("OK:GP_VERIFY:not_found")
+                self._respond("OK:GP_VERIFY:not_found %s" % _h(instance_aid).decode())
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:GP_VERIFY_FAIL:%s" % str(e))

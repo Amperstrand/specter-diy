@@ -135,6 +135,57 @@ def install_applet(session, cap_data, package_aid, applet_aid, instance_aid,
                         privileges, install_params)
 
 
+def extract_package_aid(dgp_data):
+    """Extract package AID from a DGP file.
+
+    DGP format: sequence of CAP components, each prefixed with
+    1-byte tag + 2-byte big-endian length. The first component is
+    always the Header (tag 0x01) containing:
+      magic (2B) | minor_ver (1B) | major_ver (1B) | flags (1B)
+      [if flags & 0x01: exportable_package_size (4B)]
+      aid_len (1B) | aid (aid_len B)
+
+    Returns: package AID as bytes.
+    Raises: GPLoadError if format is invalid.
+    """
+    if len(dgp_data) < 10:
+        raise GPLoadError("DGP data too short")
+    if dgp_data[0] != 0x01:
+        raise GPLoadError("DGP first component is not Header (tag 0x01)")
+    if dgp_data[3:5] != b'\xDE\xCA':
+        raise GPLoadError("DGP Header magic mismatch (expected DECA)")
+
+    flags = dgp_data[7]
+    if flags & 0x01:
+        aid_len_offset = 12
+    else:
+        aid_len_offset = 8
+
+    aid_len = dgp_data[aid_len_offset]
+    if aid_len == 0 or aid_len_offset + 1 + aid_len > len(dgp_data):
+        raise GPLoadError("DGP Header package AID is invalid")
+    return dgp_data[aid_len_offset + 1:aid_len_offset + 1 + aid_len]
+
+
+def install_from_dgp(session, dgp_data, sd_aid,
+                      privileges=b"\x00", install_params=b"\xC9\x00"):
+    """Install applet from DGP data with auto-derived AIDs.
+
+    Parses the package AID from the DGP Header, derives applet and
+    instance AIDs by appending 0x01, then runs the full install flow:
+    INSTALL [for load] -> LOAD -> INSTALL [for install and make selectable].
+
+    Returns: package_aid (bytes).
+    """
+    from binascii import hexlify
+    pkg_aid = extract_package_aid(dgp_data)
+    applet_aid = pkg_aid + b"\x01"
+    instance_aid = applet_aid
+    install_applet(session, dgp_data, pkg_aid, applet_aid, instance_aid,
+                   sd_aid, privileges, install_params)
+    return pkg_aid
+
+
 def verify_install(session, instance_aid):
     """Verify that an applet instance is installed."""
     from .registry import find_aid

@@ -18,6 +18,7 @@ from keystore.javacard.gp.loader import (
     _build_install_for_install_data,
     _encode_length,
     _encode_tlv,
+    extract_package_aid,
     LOAD_BLOCK_SIZE,
 )
 from keystore.javacard.gp.deleter import delete_aid
@@ -234,3 +235,42 @@ class TestRegistryParsing(TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(len(entries[0]["module_aids"]), 1)
         self.assertEqual(entries[0]["module_aids"][0], unhexlify("B00B5111CA01"))
+
+
+class TestExtractPackageAID(TestCase):
+    """Verify DGP package AID extraction from Header component."""
+
+    def test_teapot_dgp(self):
+        data = unhexlify(
+            "01000FDECAFFED010204000005B00B5111CA"
+        )
+        aid = extract_package_aid(data)
+        self.assertEqual(aid, unhexlify("B00B5111CA"))
+
+    def test_teapot_dgp_with_remaining_data(self):
+        data = unhexlify(
+            "01000FDECAFFED010204000005B00B5111CA"
+            "02001F000F001F000A00150072002401FC"
+        )
+        aid = extract_package_aid(data)
+        self.assertEqual(aid, unhexlify("B00B5111CA"))
+
+    def test_non_exportable_package(self):
+        data = unhexlify("01000ADECAFFED0204AABBCCDD0000")
+        aid = extract_package_aid(data)
+        self.assertEqual(aid, unhexlify("AABBCCDD"))
+
+    def test_invalid_tag(self):
+        data = unhexlify("02000FDECAFFED010204000005B00B5111CA")
+        with self.assertRaises(Exception):
+            extract_package_aid(data)
+
+    def test_invalid_magic(self):
+        data = unhexlify("01000FDEADDEED010204000005B00B5111CA")
+        with self.assertRaises(Exception):
+            extract_package_aid(data)
+
+    def test_too_short(self):
+        data = unhexlify("0100FF")
+        with self.assertRaises(Exception):
+            extract_package_aid(data)

@@ -91,8 +91,8 @@ class App(BaseApp):
 
     async def _install_from_sd(self, show_screen):
         import platform
-        from keystore.javacard.gp.loader import install_applet, verify_install
-        from keystore.javacard.gp.registry import list_all
+        from keystore.javacard.gp.loader import install_from_dgp
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
         try:
             with platform.sdcard as sd:
                 if not sd.present():
@@ -148,27 +148,25 @@ class App(BaseApp):
 
             with platform.sdcard as sd:
                 with sd.open(filepath, "rb") as f:
-                    cap_data = f.read()
+                    dgp_data = f.read()
 
-            pkg_aid = unhexlify("B00B5111CA")
-            applet_aid = unhexlify("B00B5111CA01")
-            instance_aid = unhexlify("B00B5111CA01")
-            sd_aid = unhexlify("A000000151000000")
+            from binascii import hexlify as _h
+            from keystore.javacard.gp.loader import extract_package_aid
+            pkg_aid = extract_package_aid(dgp_data)
+            pkg_aid_hex = _h(pkg_aid).decode()
 
             await show_screen(Alert(
                 title="Installing",
-                message="Sending %d bytes..." % len(cap_data),
+                message="Package: %s\n%d bytes" % (pkg_aid_hex, len(dgp_data)),
                 button_text="Close",
             ))
 
-            install_applet(
-                session, cap_data, pkg_aid, applet_aid,
-                instance_aid, sd_aid
-            )
+            sd_aid = JCOP4_PROFILE["isd_aid"]
+            installed_aid = install_from_dgp(session, dgp_data, sd_aid)
 
             await show_screen(Alert(
                 title="Success",
-                message="%s installed!" % filename,
+                message="%s\n%s installed!" % (filename, _h(installed_aid).decode()),
                 button_text="Close",
             ))
 
