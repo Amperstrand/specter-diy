@@ -6,13 +6,14 @@ Determines whether an inserted card is:
 - An unknown card
 """
 
-from .scp03 import SCP03Error, open_session, _select_isd
+from binascii import unhexlify
+from .scp02 import SCP02Error, open_session, _select_isd
 from .registry import find_aid
 from .profiles import match_profile, JCOP4_PROFILE
 
 
-MEMORYCARD_APPLET_AID = bytes.fromhex("B00B5111CB01")
-MEMORYCARD_PACKAGE_AID = bytes.fromhex("B00B5111CB")
+MEMORYCARD_APPLET_AID = unhexlify("B00B5111CB01")
+MEMORYCARD_PACKAGE_AID = unhexlify("B00B5111CB")
 
 
 def probe_card(connection):
@@ -88,7 +89,7 @@ def probe_card(connection):
                 result["kind"] = "gp_supported"
             else:
                 result["kind"] = "gp_installable"
-    except SCP03Error:
+    except SCP02Error:
         result["kind"] = "unknown"
     except Exception:
         result["kind"] = "unknown"
@@ -106,7 +107,7 @@ def _check_known_applets(connection, result):
     from ..applets.applet import Applet
 
     known = [
-        ("MemoryCard", bytes.fromhex("B00B5111CB01"), "memorycard"),
+        ("MemoryCard", unhexlify("B00B5111CB01"), "memorycard"),
         ("SeedKeeper", bytes([0x53, 0x65, 0x65, 0x64, 0x4B, 0x65, 0x65, 0x70, 0x65, 0x72]), "seedkeeper"),
     ]
 

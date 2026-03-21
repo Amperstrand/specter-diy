@@ -3,6 +3,8 @@
 Reference: GlobalPlatform Card Specification v2.3, Section 11.6
 """
 
+from binascii import hexlify
+
 
 class GPDeleteError(Exception):
     pass
@@ -22,7 +24,7 @@ def delete_aid(session, aid, delete_related=True):
 
     if sw1 != 0x90 and sw1 != 0x91:
         raise GPDeleteError("DELETE failed for %s: SW=%02X%02X"
-                            % (aid.hex(), sw1, sw2))
+                            % (hexlify(aid).decode(), sw1, sw2))
 
     if sw1 == 0x91:
         remaining = sw2

@@ -2,6 +2,7 @@ import sys
 import gc
 import json
 from io import BytesIO
+from binascii import unhexlify
 import asyncio
 
 from platform import (
@@ -83,7 +84,7 @@ class Specter:
         from gui.screens.provisioning import ProvisioningProgressScreen
         from keystore.javacard.util import get_connection
         from keystore.javacard.gp.profiles import JCOP4_PROFILE
-        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.scp02 import open_session
         from keystore.javacard.gp.loader import install_memorycard, verify_install
         from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
         import hashlib
@@ -108,9 +109,9 @@ class Specter:
 
             scr.set_step("Loading package...")
             scr.set_detail("Sending %d bytes..." % len(CAP_DATA))
-            package_aid = bytes.fromhex("B00B5111CB")
-            applet_aid = bytes.fromhex("B00B5111CB01")
-            instance_aid = bytes.fromhex("B00B5111CB01")
+            package_aid = unhexlify("B00B5111CB")
+            applet_aid = unhexlify("B00B5111CB01")
+            instance_aid = unhexlify("B00B5111CB01")
             sd_aid = JCOP4_PROFILE["isd_aid"]
             privileges = JCOP4_PROFILE["privileges"]
 
@@ -166,7 +167,7 @@ class Specter:
         from keystore.javacard.util import get_connection
         from keystore.javacard.gp.probe import probe_card
         from keystore.javacard.gp.profiles import JCOP4_PROFILE
-        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.scp02 import open_session
         from keystore.javacard.gp.registry import list_all, format_registry
 
         conn = get_connection()
@@ -203,7 +204,7 @@ class Specter:
         from gui.screens.provisioning import ProvisioningProgressScreen
         from keystore.javacard.util import get_connection
         from keystore.javacard.gp.profiles import JCOP4_PROFILE
-        from keystore.javacard.gp.scp03 import open_session
+        from keystore.javacard.gp.scp02 import open_session
         from keystore.javacard.gp.deleter import delete_aid
 
         scr = ProvisioningProgressScreen("Delete MemoryCard")
@@ -218,11 +219,11 @@ class Specter:
             session = open_session(conn, JCOP4_PROFILE)
 
             scr.set_step("Deleting applet...")
-            applet_aid = bytes.fromhex("B00B5111CB01")
+            applet_aid = unhexlify("B00B5111CB01")
             delete_aid(session, applet_aid)
 
             scr.set_step("Deleting package...")
-            package_aid = bytes.fromhex("B00B5111CB")
+            package_aid = unhexlify("B00B5111CB")
             try:
                 delete_aid(session, package_aid)
             except Exception:

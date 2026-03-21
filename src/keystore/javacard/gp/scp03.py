@@ -59,9 +59,12 @@ def _compute_host_cryptogram(s_mac, host_chal, card_chal):
 
 
 def _select_isd(conn, isd_aid):
-    """SELECT the Issuer Security Domain (Card Manager)."""
-    data = bytes([len(isd_aid)]) + isd_aid
-    apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(data)]) + data + bytes([0x00])
+    """SELECT the Issuer Security Domain (Card Manager).
+
+    Uses P1=04 (select by DF name) with no data field to auto-select
+    the ISD, matching the behavior of gp.jar.
+    """
+    apdu = bytes([0x00, 0xA4, 0x04, 0x00, 0x00])
     resp = conn.transmit(apdu)
     if isinstance(resp[0], bytes):
         resp_data = resp[0]
@@ -74,7 +77,7 @@ def _select_isd(conn, isd_aid):
 
 
 def _parse_init_update_response(resp_data, expected_kvi):
-    if len(resp_data) < 29:
+    if len(resp_data) < 28:
         raise SCP03Error("INIT UPDATE response too short: %d bytes" % len(resp_data))
 
     kdd = resp_data[0:10]

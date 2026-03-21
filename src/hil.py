@@ -442,22 +442,32 @@ class HILCommandHandler:
             log_exception("HIL", e)
             self._respond("ERR:CARD_RESET_FAIL:%s" % str(e))
 
+    def _gp_connect(self):
+        """Disconnect existing connection, wait, and reconnect for GP operations."""
+        from keystore.javacard.util import get_connection
+        import time as _time
+        conn = get_connection()
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+        _time.sleep_ms(500)
+        conn.connect(conn.T1_protocol)
+        return conn
+
     def _gp_init(self):
         try:
             from binascii import hexlify
-            from keystore.javacard.util import get_connection
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
-            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.scp02 import open_session
 
-            conn = get_connection()
-            conn.connect(conn.T1_protocol)
-
+            conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
             parts = [
-                "SCP03",
+                "SCP02",
                 "kvi=%d" % JCOP4_PROFILE["key_version"],
-                "rmac=%d" % (1 if session.rmac_supported else 0),
-                "renc=%d" % (1 if session.renc_supported else 0),
+                "mac=%d" % (1 if session.mac else 0),
+                "enc=%d" % (1 if session.enc else 0),
             ]
             self._respond("OK:GP_INIT:%s" % ",".join(parts))
         except Exception as e:
@@ -466,14 +476,11 @@ class HILCommandHandler:
 
     def _gp_status(self):
         try:
-            from binascii import hexlify
-            from keystore.javacard.util import get_connection
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
-            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.scp02 import open_session
             from keystore.javacard.gp.registry import list_all, format_registry
 
-            conn = get_connection()
-            conn.connect(conn.T1_protocol)
+            conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
             registry = list_all(session)
             text = format_registry(registry)
@@ -484,16 +491,13 @@ class HILCommandHandler:
 
     def _gp_delete(self, hex_aid):
         try:
-            from binascii import unhexlify, hexlify
-            from keystore.javacard.util import get_connection
+            from binascii import unhexlify
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
-            from keystore.javacard.gp.scp03 import open_session
+            from keystore.javacard.gp.scp02 import open_session
             from keystore.javacard.gp.deleter import delete_aid
-            from keystore.javacard.gp.registry import find_aid
 
             aid = unhexlify(hex_aid.strip())
-            conn = get_connection()
-            conn.connect(conn.T1_protocol)
+            conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
             delete_aid(session, aid)
             self._respond("OK:GP_DELETED:%s" % hex_aid.strip())
@@ -503,12 +507,11 @@ class HILCommandHandler:
 
     def _gp_install(self):
         try:
-            from keystore.javacard.util import get_connection
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
             from keystore.javacard.gp.scp03 import open_session
-            from keystore.javacard.gp.loader import install_memorycard, verify_install
+            from keystore.javacard.gp.loader import install_applet, verify_install
             from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
-            from binascii import hexlify
+            from binascii import unhexlify
             import hashlib
 
             sha = hashlib.sha256(CAP_DATA).hexdigest()
@@ -516,20 +519,19 @@ class HILCommandHandler:
                 self._respond("ERR:GP_INSTALL_FAIL:CAP hash mismatch")
                 return
 
-            conn = get_connection()
-            conn.connect(conn.T1_protocol)
+            conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
 
-            package_aid = bytes.fromhex("B00B5111CB")
-            applet_aid = bytes.fromhex("B00B5111CB01")
-            instance_aid = bytes.fromhex("B00B5111CB01")
+            package_aid = unhexlify("B00B5111CB")
+            applet_aid = unhexlify("B00B5111CB01")
+            instance_aid = unhexlify("B00B5111CB01")
             sd_aid = JCOP4_PROFILE["isd_aid"]
             privileges = JCOP4_PROFILE["privileges"]
 
             self._respond("OK:GP_INSTALL:loading")
-            install_memorycard(
+            install_applet(
                 session, CAP_DATA, package_aid, applet_aid,
-                instance_aid, sd_aid, privileges)
+                instance_aid, sd_aid)
 
             if verify_install(session, instance_aid):
                 self._respond("OK:GP_INSTALL:success")
@@ -541,17 +543,15 @@ class HILCommandHandler:
 
     def _gp_verify(self):
         try:
-            from binascii import hexlify
-            from keystore.javacard.util import get_connection
             from keystore.javacard.gp.profiles import JCOP4_PROFILE
             from keystore.javacard.gp.scp03 import open_session
             from keystore.javacard.gp.registry import find_aid
+            from binascii import unhexlify
 
-            conn = get_connection()
-            conn.connect(conn.T1_protocol)
+            conn = self._gp_connect()
             session = open_session(conn, JCOP4_PROFILE)
 
-            instance_aid = bytes.fromhex("B00B5111CB01")
+            instance_aid = unhexlify("B00B5111CB01")
             entry = find_aid(session, instance_aid)
             if entry is not None:
                 self._respond("OK:GP_VERIFY:installed")
@@ -564,10 +564,9 @@ class HILCommandHandler:
     def _gp_probe(self):
         try:
             from binascii import hexlify
-            from keystore.javacard.util import get_connection
             from keystore.javacard.gp.probe import probe_card
 
-            conn = get_connection()
+            conn = self._gp_connect()
             result = probe_card(conn)
             kind = result["kind"]
             atr = hexlify(result.get("atr", b"")).decode() if result.get("atr") else ""

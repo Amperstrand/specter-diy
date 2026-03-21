@@ -4,22 +4,27 @@ Each profile defines how to communicate with a specific JavaCard type.
 Version 1 supports JCOP4 with GP default keys and SCP03.
 """
 
-from binascii import hexlify
+from binascii import hexlify, unhexlify
 
-GP_DEFAULT_KEY = bytes.fromhex("404142434445464748494A4B4C4D4E4F")
+
+def _hex(s):
+    return unhexlify(s.encode())
+
+
+GP_DEFAULT_KEY = _hex("404142434445464748494A4B4C4D4E4F")
 
 JCOP4_PROFILE = {
     "name": "JCOP4",
-    "atr_prefix": bytes.fromhex("3BD518FF8191FE1FC38073C821100A"),
-    "isd_aid": bytes.fromhex("A000000151000000"),
-    "scp": "scp03",
+    "atr_prefix": _hex("3BD518FF8191FE1FC38073C821100A"),
+    "isd_aid": _hex("A000000151000000"),
+    "scp": "scp02",
     "key_version": 0,
     "key_index": 0,
     "enc_key": GP_DEFAULT_KEY,
     "mac_key": GP_DEFAULT_KEY,
     "rmac_key": GP_DEFAULT_KEY,
     "dek_key": GP_DEFAULT_KEY,
-    "privileges": bytes.fromhex("C900"),
+    "privileges": _hex("C900"),
 }
 
 PROFILES = [JCOP4_PROFILE]

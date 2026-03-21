@@ -1,92 +1,73 @@
-import os
-from specter import Specter
-from gui.specter import SpecterGUI
-
-from keystore.core import KeyStore
-from keystore.sdcard import SDKeyStore
-from keystore.memorycard import MemoryCard
-from keystore.seedkeeper import SeedKeeper
-
-from hosts import SDHost, QRHost, USBHost, Host
 import platform
-from helpers import load_apps
-from app import BaseApp
-import display
 
 if platform.hil_test_mode:
-    from debug_trace import log
-    os.dupterm(None, 0)
-    log("BOOT", "HIL mode: dupterm disabled (USB VCP already enabled in boot.py)")
+    pass
+else:
+    from specter import Specter
+    from gui.specter import SpecterGUI
 
-def main(apps=None, network="main", keystore_cls=None):
-    """
-    apps: list of apps to load
-    network: default network to operate
-    keystores: list of KeyStore classes that can be used
-    """
-    if platform.hil_test_mode and network == "main":
-        network = "regtest"
+    from keystore.core import KeyStore
+    from keystore.sdcard import SDKeyStore
+    from keystore.memorycard import MemoryCard
+    from keystore.seedkeeper import SeedKeeper
 
-    # Init display first as it also inits the SDRAM
-    display.init(False)
-    # create virtual file system /sdram
-    # for temp untrusted data storage
-    rampath = platform.mount_sdram()
+    from hosts import SDHost, QRHost, USBHost, Host
+    from helpers import load_apps
+    from app import BaseApp
+    import display
+    import os
 
-    # set working path to empty folder in sdram
-    if not platform.simulator:
-        cwd = rampath+"/cwd"
-        platform.maybe_mkdir(cwd)
-        os.chdir(cwd)
+    def main(apps=None, network="main", keystore_cls=None):
+        if platform.hil_test_mode and network == "main":
+            network = "regtest"
 
-    # define hosts - USB, QR, SDCard
-    # each hosts gets it's own RAM folder for data
-    Host.SETTINGS_DIR = platform.fpath("/qspi/hosts")
-    Specter.SETTINGS_DIR = platform.fpath("/qspi/global")
-    hosts = [
-        USBHost(rampath + "/usb"),
-        QRHost(rampath + "/qr"),
-        SDHost(rampath+"/sd"),
-    ]
-    # temp storage in RAM for host commands processing
-    BaseApp.TEMPDIR = rampath+"/tmp"
+        display.init(False)
+        rampath = platform.mount_sdram()
 
-    # define GUI
-    if not platform.simulator:
-        gui = SpecterGUI()
-    else:
-        # this GUI can simulate user actions for automated testing
-        from gui.tcp_gui import TCPGUI
-        gui = TCPGUI()
+        if not platform.simulator:
+            cwd = rampath+"/cwd"
+            platform.maybe_mkdir(cwd)
+            os.chdir(cwd)
 
-    # inject the folder where keystore stores it's data
-    KeyStore.path = platform.fpath("/flash/keystore")
-    # detect keystore to use
-    if keystore_cls is not None:
-        keystores = [keystore_cls]
-    else:
-        keystores = [
-            MemoryCard,
-            SeedKeeper,
-            SDKeyStore,
+        Host.SETTINGS_DIR = platform.fpath("/qspi/hosts")
+        Specter.SETTINGS_DIR = platform.fpath("/qspi/global")
+        hosts = [
+            USBHost(rampath + "/usb"),
+            QRHost(rampath + "/qr"),
+            SDHost(rampath+"/sd"),
         ]
+        BaseApp.TEMPDIR = rampath+"/tmp"
 
-    # loading apps
-    if apps is None:
-        apps = load_apps()
+        if not platform.simulator:
+            gui = SpecterGUI()
+        else:
+            from gui.tcp_gui import TCPGUI
+            gui = TCPGUI()
 
-    # make Specter instance
-    settings_path = platform.fpath("/flash")
-    specter = Specter(
-        gui=gui,
-        keystores=keystores,
-        hosts=hosts,
-        apps=apps,
-        settings_path=settings_path,
-        network=network,
-    )
-    specter.start()
+        KeyStore.path = platform.fpath("/flash/keystore")
+        if keystore_cls is not None:
+            keystores = [keystore_cls]
+        else:
+            keystores = [
+                MemoryCard,
+                SeedKeeper,
+                SDKeyStore,
+            ]
+
+        if apps is None:
+            apps = load_apps()
+
+        settings_path = platform.fpath("/flash")
+        specter = Specter(
+            gui=gui,
+            keystores=keystores,
+            hosts=hosts,
+            apps=apps,
+            settings_path=settings_path,
+            network=network,
+        )
+        specter.start()
 
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
