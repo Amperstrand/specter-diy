@@ -1,0 +1,24 @@
+=== Environment Summary ===
+Timestamp: 2026-03-20T10:37:05Z
+OS: "Ubuntu 24.04.4 LTS"
+Kernel: 6.17.0-19-generic
+Arch: x86_64
+Java: openjdk version "21.0.10" 2026-01-20
+pcscd: pcsc-lite version 2.0.3.
+GPPro: gp.jar v25.10.20 from https://github.com/martinpaljak/GlobalPlatformPro/releases/tag/v25.10.20
+Reader: Gemalto PC Twin Reader (08e6:3437), serial BCF852F0, USB Bus 1 Dev 2
+Card connected via PC/SC: yes
+pcsc-spy: custom built from source
+tshark: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).
+
+=== Card Metadata ===
+ATR: 3B D5 18 FF 81 91 FE 1F C3 80 73 C8 21 10 0A
+Protocol: T=1 (negotiated)
+
+=== Artifact Hashes ===
+c88e0c5093032ec4571571f5397b6174e56bf632667950fa5bb716338534b122  gp.jar
+5f855f0c490402ac2f1e4cb1fc39cf6e4ce3d633fcb407fe024d275677f0efb4  MemoryCardApplet.cap
+gp.jar size: 14840623 bytes
+MemoryCardApplet.cap size: 14840623 bytes
+gp.jar size: 61325 bytes
+MemoryCardApplet.cap size: 61325 bytes

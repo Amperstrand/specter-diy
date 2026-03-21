@@ -139,6 +139,10 @@ def setup_native_stubs():
     if not hasattr(decorators, "on_release"):
         decorators.on_release = lambda func: func
 
+    rng = _ensure_module("rng")
+    if not hasattr(rng, "get_random_bytes"):
+        rng.get_random_bytes = lambda n: bytes(n)
+
     ucryptolib = _ensure_module("ucryptolib")
     if not hasattr(ucryptolib, "aes"):
         class _DummyAES:
