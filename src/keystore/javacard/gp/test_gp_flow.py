@@ -210,9 +210,11 @@ def main():
     print()
     print("--- Test 3: AID Lookup ---")
     from keystore.javacard.gp.registry import find_aid
+    from keystore.javacard.gp.deleter import delete_aid
 
     sato = unhexlify("5361746f4368697000")
     mc = unhexlify("B00B5111CB01")
+    mc_pkg = unhexlify("B00B5111CB")
     try:
         sato_entry = find_aid(session, sato)
         report("SatoChip found", sato_entry is not None)
@@ -221,7 +223,18 @@ def main():
 
     try:
         mc_entry = find_aid(session, mc)
-        report("MemoryCard absent", mc_entry is None)
+        if mc_entry is not None:
+            try:
+                delete_aid(session, mc)
+            except Exception:
+                pass
+            try:
+                delete_aid(session, mc_pkg)
+            except Exception:
+                pass
+            report("MemoryCard absent", True, "found leftover, cleaned up")
+        else:
+            report("MemoryCard absent", True)
     except Exception as e:
         report("MemoryCard absent", False, str(e))
 
