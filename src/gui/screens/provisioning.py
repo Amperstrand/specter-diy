@@ -61,7 +61,7 @@ class ProvisioningProgressScreen(Screen):
 
 
 class ProvisioningDetailsScreen(Screen):
-    """Shows card info and registry dump for developer diagnostics."""
+    """Shows card info, detected applets, and registry dump."""
 
     def __init__(self, info):
         super().__init__()
@@ -69,13 +69,19 @@ class ProvisioningDetailsScreen(Screen):
 
         kind = info.get("kind", "unknown")
         atr = info.get("atr", b"")
-        mc = info.get("memorycard_installed", False)
+        applets = info.get("applets", [])
 
         from binascii import hexlify
         lines = "Type: %s" % kind
         if atr:
             lines += "\nATR: %s" % hexlify(atr).decode()
-        lines += "\nMemoryCard: %s" % ("installed" if mc else "not found")
+
+        if applets:
+            lines += "\n\nDetected:"
+            for name in applets:
+                lines += "\n  %s" % name
+        else:
+            lines += "\n\nNo known applets"
 
         self.info_label = add_label(lines, scr=self, style="hint")
         self.info_label.align(self.title, lv.ALIGN.OUT_BOTTOM_MID, 0, 20)

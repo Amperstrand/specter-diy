@@ -89,6 +89,17 @@ class Specter:
         from keystore.javacard.memorycard_cap import CAP_DATA, CAP_SHA256
         import hashlib
 
+        if probe_result.get("memorycard_installed"):
+            if not await self.gui.prompt(
+                "MemoryCard already installed",
+                "MemoryCard is already on this card.\n\n"
+                "Reinstalling will delete existing data.\n\n"
+                "Continue?",
+                warning="All stored data will be lost!",
+            ):
+                return
+            await self._delete_memorycard(silent=True)
+
         scr = ProvisioningProgressScreen("Install MemoryCard")
         await self.gui.load_screen(scr)
 
@@ -168,9 +179,10 @@ class Specter:
                 await self._delete_seedkeeper()
 
     async def _show_card_details(self):
-        """Show card probe results and registry dump."""
+        """Show card info, detected applets, and registry dump."""
         from gui.screens.provisioning import ProvisioningDetailsScreen
         from keystore.javacard.util import get_connection
+        from keystore.javacard.card_scanner import scan_card_applets
         from keystore.javacard.gp.probe import probe_card
         from keystore.javacard.gp.profiles import JCOP4_PROFILE
         from keystore.javacard.gp.scp02 import open_session
@@ -178,6 +190,10 @@ class Specter:
 
         conn = get_connection()
         result = probe_card(conn)
+
+        scan = scan_card_applets(conn)
+        result["applets"] = scan.get("applets", [])
+
         scr = ProvisioningDetailsScreen(result)
         await self.gui.load_screen(scr)
 
@@ -196,16 +212,17 @@ class Specter:
 
         await scr.result()
 
-    async def _delete_memorycard(self):
+    async def _delete_memorycard(self, silent=False):
         """Delete MemoryCard applet from card."""
-        if not await self.gui.prompt(
-            "Delete MemoryCard?",
-            "This will remove the MemoryCard applet\n"
-            "and all its data from the card.\n\n"
-            "Are you sure?",
-            warning="This action cannot be undone!",
-        ):
-            return
+        if not silent:
+            if not await self.gui.prompt(
+                "Delete MemoryCard?",
+                "This will remove the MemoryCard applet\n"
+                "and all its data from the card.\n\n"
+                "Are you sure?",
+                warning="This action cannot be undone!",
+            ):
+                return
 
         from gui.screens.provisioning import ProvisioningProgressScreen
         from keystore.javacard.util import get_connection
@@ -235,6 +252,8 @@ class Specter:
             except Exception:
                 pass
 
+            if silent:
+                return
             scr.set_done()
             try:
                 conn.disconnect()
@@ -246,6 +265,8 @@ class Specter:
                 conn.disconnect()
             except Exception:
                 pass
+            if silent:
+                raise
             scr.set_error("Delete failed:\n%s" % str(e))
             await scr.result()
 
@@ -267,6 +288,24 @@ class Specter:
             )
             return
 
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.card_scanner import scan_card_applets
+
+        conn = get_connection()
+        scan = scan_card_applets(conn)
+        already_installed = "SeedKeeper" in scan.get("applets", [])
+
+        if already_installed:
+            if not await self.gui.prompt(
+                "SeedKeeper already installed",
+                "SeedKeeper is already on this card.\n\n"
+                "Reinstalling will delete existing secrets.\n\n"
+                "Continue?",
+                warning="All stored secrets will be lost!",
+            ):
+                return
+            await self._delete_seedkeeper(silent=True)
+
         if not await self.gui.prompt(
             "Install SeedKeeper?",
             "This will install the SeedKeeper applet\n"
@@ -277,7 +316,6 @@ class Specter:
             return
 
         from gui.screens.provisioning import ProvisioningProgressScreen
-        from keystore.javacard.util import get_connection
         from keystore.javacard.gp.profiles import JCOP4_PROFILE
         from keystore.javacard.gp.scp02 import open_session
         from keystore.javacard.gp.loader import install_from_dgp, verify_install
@@ -323,16 +361,17 @@ class Specter:
             scr.set_error("Install failed:\n%s" % str(e))
             await scr.result()
 
-    async def _delete_seedkeeper(self):
+    async def _delete_seedkeeper(self, silent=False):
         """Delete SeedKeeper applet from card."""
-        if not await self.gui.prompt(
-            "Delete SeedKeeper?",
-            "This will remove the SeedKeeper applet\n"
-            "and all its secrets from the card.\n\n"
-            "Are you sure?",
-            warning="This action cannot be undone!",
-        ):
-            return
+        if not silent:
+            if not await self.gui.prompt(
+                "Delete SeedKeeper?",
+                "This will remove the SeedKeeper applet\n"
+                "and all its secrets from the card.\n\n"
+                "Are you sure?",
+                warning="This action cannot be undone!",
+            ):
+                return
 
         from gui.screens.provisioning import ProvisioningProgressScreen
         from keystore.javacard.util import get_connection
@@ -363,6 +402,8 @@ class Specter:
             except Exception:
                 pass
 
+            if silent:
+                return
             scr.set_done()
             try:
                 conn.disconnect()
