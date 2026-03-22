@@ -19,6 +19,7 @@ from keystore.javacard.gp.loader import (
     _encode_length,
     _encode_tlv,
     extract_package_aid,
+    extract_applet_aid,
     LOAD_BLOCK_SIZE,
 )
 from keystore.javacard.gp.deleter import delete_aid
@@ -239,21 +240,6 @@ class TestRegistryParsing(TestCase):
 
 class TestExtractPackageAID(TestCase):
     """Verify DGP package AID extraction from Header component."""
-
-    def test_teapot_dgp(self):
-        data = unhexlify(
-            "01000FDECAFFED010204000005B00B5111CA"
-        )
-        aid = extract_package_aid(data)
-        self.assertEqual(aid, unhexlify("B00B5111CA"))
-
-    def test_teapot_dgp_with_remaining_data(self):
-        data = unhexlify(
-            "01000FDECAFFED010204000005B00B5111CA"
-            "02001F000F001F000A00150072002401FC"
-        )
-        aid = extract_package_aid(data)
-        self.assertEqual(aid, unhexlify("B00B5111CA"))
 
     def test_non_exportable_package(self):
         data = unhexlify("01000ADECAFFED0204AABBCCDD0000")

@@ -1,0 +1,33 @@
+# Applet distribution configuration
+#
+# Each entry defines a JavaCard applet available for on-device installation.
+# Run `make dgps` to download CAP files, convert to DGP, and verify checksums.
+#
+# DGP format: CAP components concatenated in GP order (tags 1-9),
+# excluding Descriptor.cap. See tools/cap_to_dgp.py for details.
+#
+# To add a new applet:
+#   1. Add an entry below with download URL and checksums
+#   2. Run `make dgps` to generate the DGP file
+#   3. Upload to device: mpremote cp bin/applets/<name>.dgp :/flash/gp/
+
+seedkeeper:
+  name: SeedKeeper
+  version: v0.2-0.1
+  cap_url: https://github.com/Toporin/Seedkeeper-Applet/releases/download/v0.2-0.1/SeedKeeper-v0.2-0.1.cap
+  cap_sha256: 28dbae3c7c130a6f7d0e6d05f41386ffd93976fd290eaa5d8db708b9903dabcd
+  dgp_sha256: e447e45f37cafeb751fff1fdd71002c4e5cf0e837a9586ed6cea51369c841128
+  dgp_path: /flash/gp/SeedKeeper.dgp
+  package_aid: "536565644b6565706572"
+  applet_aid: "536565644b656570657200"
+
+memorycard:
+  name: MemoryCard
+  version: "1.0"
+  cap_url: TBD
+  cap_sha256: TBD
+  dgp_sha256: TBD
+  dgp_path: /flash/gp/MemoryCard.dgp
+  package_aid: "B00B5111CB"
+  applet_aid: "B00B5111CB01"
+  note: Currently frozen as memorycard_cap.py. Transition to DGP pending SD card support.

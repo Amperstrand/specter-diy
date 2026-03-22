@@ -99,7 +99,7 @@ clean:
 		USER_C_MODULES=$(USER_C_MODULES) \
 		FROZEN_MANIFEST=$(FROZEN_MANIFEST_DISCO) clean
 
-.PHONY: all clean git-info
+.PHONY: all clean git-info dgps verify-dgps
 
 # Build config (auto-generated at build time, frozen into firmware).
 # Set HIL=1 to enable hardware-in-the-loop test mode.
@@ -131,3 +131,12 @@ hiltest:
 	.venv/bin/python3 test/integration/hardwareintheloop.py
 
 .PHONY: hil hilflash hiltest
+
+# Download CAP files, convert to DGP, verify checksums
+# Reads applets.yaml. Output: bin/applets/*.dgp
+dgps:
+	@python3 tools/make_dgps.py
+
+# Verify existing DGP checksums without downloading
+verify-dgps:
+	@python3 tools/make_dgps.py --verify
