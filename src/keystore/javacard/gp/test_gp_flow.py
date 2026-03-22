@@ -12,8 +12,10 @@ Tests the full GlobalPlatform lifecycle on JCOP4 via SCP02:
   7. Verify installation
   8. DELETE applet + package
   9. Verify deletion
+  10. SeedKeeper install (optional, requires SeedKeeper.dgp)
 
-Requires: teapot_cap.py uploaded to board filesystem.
+Requires: TeapotApplet.dgp uploaded to /flash/gp/
+Optional: SeedKeeper.dgp uploaded to /flash/gp/ for SeedKeeper install test
 """
 
 from binascii import hexlify, unhexlify
@@ -248,6 +250,70 @@ def main():
         report("TeapotApplet removed", not found2)
     except Exception as e:
         report("TeapotApplet removed", False, str(e))
+
+    # --- Test 10: SeedKeeper Install (optional) ---
+    print()
+    print("--- Test 10: SeedKeeper Install ---")
+    seedkeeper_path = "/flash/gp/SeedKeeper.dgp"
+    seedkeeper_pkg = unhexlify("536565644b6565706572")  # "SeedKeeper"
+    seedkeeper_inst = seedkeeper_pkg + b"\x01"  # applet AID with 0x01 suffix
+
+    # Check if SeedKeeper.dgp exists
+    try:
+        f = open(seedkeeper_path, "rb")
+        f.close()
+        sk_exists = True
+    except Exception:
+        sk_exists = False
+        print("       Skipping: %s not found" % seedkeeper_path)
+        print("       To test SeedKeeper install, copy the DGP file:")
+        print("       mpremote cp SeedKeeper.dgp :/flash/gp/")
+
+    if sk_exists:
+        # Check if already installed
+        try:
+            sk_entry = find_aid(session, seedkeeper_inst)
+            sk_already = sk_entry is not None
+            report("SeedKeeper pre-check", True, "installed=%s" % sk_already)
+        except Exception as e:
+            sk_already = False
+            report("SeedKeeper pre-check", False, str(e))
+
+        if sk_already:
+            report("SeedKeeper already installed", True, "skipping install")
+        else:
+            # Install SeedKeeper using install_from_dgp
+            from keystore.javacard.gp.loader import install_from_dgp
+
+            try:
+                f = open(seedkeeper_path, "rb")
+                sk_data = f.read()
+                f.close()
+                report("SeedKeeper DGP loaded", True, "%d bytes" % len(sk_data))
+            except Exception as e:
+                report("SeedKeeper DGP loaded", False, str(e))
+                sk_data = None
+
+            if sk_data:
+                try:
+                    t0 = time.ticks_ms()
+                    pkg_aid = install_from_dgp(session, sk_data, sd_aid)
+                    elapsed = time.ticks_diff(time.ticks_ms(), t0)
+                    blocks = (len(sk_data) + 254) // 255
+                    report("SeedKeeper install", True, "%d bytes in %d blocks, %d ms" % (
+                        len(sk_data), blocks, elapsed))
+                except Exception as e:
+                    report("SeedKeeper install", False, str(e))
+
+                # Verify installation
+                try:
+                    sk_found = verify_install(session, seedkeeper_inst)
+                    report("SeedKeeper verified", sk_found)
+                except Exception as e:
+                    report("SeedKeeper verified", False, str(e))
+
+                # Note: We don't delete SeedKeeper - leave it installed for use
+                print("       SeedKeeper left installed for keystore use")
 
     # --- Cleanup ---
     try:
