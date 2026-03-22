@@ -167,19 +167,53 @@ def extract_package_aid(dgp_data):
     return dgp_data[aid_len_offset + 1:aid_len_offset + 1 + aid_len]
 
 
+def extract_applet_aid(dgp_data):
+    """Extract the first applet AID from the Applet.cap component.
+
+    Scans DGP components for tag 0x03 (Applet.cap), then parses:
+      num_applets (1B) | aid_len (1B) | aid (aid_len B)
+
+    Returns: applet AID as bytes (first applet found).
+    Raises: GPLoadError if Applet.cap not found or format invalid.
+    """
+    if len(dgp_data) < 6:
+        raise GPLoadError("DGP data too short")
+    i = 0
+    while i < len(dgp_data):
+        tag = dgp_data[i]
+        comp_len = (dgp_data[i + 1] << 8) | dgp_data[i + 2]
+        if tag == 0x03:
+            content = dgp_data[i + 3:i + 3 + comp_len]
+            if len(content) < 2:
+                raise GPLoadError("Applet.cap too short")
+            n = content[0]
+            off = 1
+            if off >= len(content):
+                raise GPLoadError("Applet.cap: no applet entries")
+            aid_len = content[off]
+            off += 1
+            if aid_len == 0 or off + aid_len > len(content):
+                raise GPLoadError("Applet.cap: invalid AID length")
+            return content[off:off + aid_len]
+        i += 3 + comp_len
+        if comp_len == 0:
+            break
+    raise GPLoadError("Applet.cap component (tag 0x03) not found in DGP")
+
+
 def install_from_dgp(session, dgp_data, sd_aid,
                       privileges=b"\x00", install_params=b"\xC9\x00"):
     """Install applet from DGP data with auto-derived AIDs.
 
-    Parses the package AID from the DGP Header, derives applet and
-    instance AIDs by appending 0x01, then runs the full install flow:
+    Parses package AID from DGP Header and applet AID from Applet.cap,
+    then runs the full install flow:
     INSTALL [for load] -> LOAD -> INSTALL [for install and make selectable].
 
     Returns: package_aid (bytes).
     """
     from binascii import hexlify
     pkg_aid = extract_package_aid(dgp_data)
-    applet_aid = pkg_aid + b"\x01"
+    applet_aid = extract_applet_aid(dgp_data)
     instance_aid = applet_aid
     install_applet(session, dgp_data, pkg_aid, applet_aid, instance_aid,
                    sd_aid, privileges, install_params)

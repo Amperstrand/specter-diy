@@ -30,13 +30,11 @@ JCOP4_PROFILE = {
 PROFILES = [JCOP4_PROFILE]
 
 
-# Applet AIDs for known applets
-# Package AID is the base, Applet/Instance AID is package + 0x01
 APPLET_AIDS = {
     "seedkeeper": {
         "name": "SeedKeeper",
         "package_aid": _hex("536565644b6565706572"),  # "SeedKeeper"
-        "applet_aid": _hex("536565644b656570657201"),  # + 0x01
+        "applet_aid": _hex("536565644b656570657200"),  # "SeedKeeper\0"
         "dgp_file": "/flash/gp/SeedKeeper.dgp",
         "sha256": "e447e45f37cafeb751fff1fdd71002c4e5cf0e837a9586ed6cea51369c841128",
         "size": 18641,

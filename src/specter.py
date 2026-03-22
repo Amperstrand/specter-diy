@@ -342,7 +342,7 @@ class Specter:
             pkg_aid = install_from_dgp(session, dgp_data, sd_aid)
 
             scr.set_step("Verifying...")
-            sk_inst = unhexlify("536565644b656570657201")
+            sk_inst = unhexlify("536565644b656570657200")
             if verify_install(session, sk_inst):
                 scr.set_done()
             else:
@@ -392,7 +392,7 @@ class Specter:
             session = open_session(conn, JCOP4_PROFILE)
 
             scr.set_step("Deleting applet...")
-            sk_inst = unhexlify("536565644b656570657201")
+            sk_inst = unhexlify("536565644b656570657200")
             delete_aid(session, sk_inst)
 
             scr.set_step("Deleting package...")

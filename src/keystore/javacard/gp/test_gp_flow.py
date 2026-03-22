@@ -256,7 +256,7 @@ def main():
     print("--- Test 10: SeedKeeper Install ---")
     seedkeeper_path = "/flash/gp/SeedKeeper.dgp"
     seedkeeper_pkg = unhexlify("536565644b6565706572")  # "SeedKeeper"
-    seedkeeper_inst = seedkeeper_pkg + b"\x01"  # applet AID with 0x01 suffix
+    seedkeeper_inst = seedkeeper_pkg + b"\x00"  # "SeedKeeper\0" (from Applet.cap)
 
     # Check if SeedKeeper.dgp exists
     try:
