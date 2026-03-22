@@ -143,6 +143,8 @@ class Specter:
             (1, "Card info"),
             (2, "Install MemoryCard"),
             (3, "Delete MemoryCard"),
+            (4, "Install SeedKeeper"),
+            (5, "Delete SeedKeeper"),
         ]
         while True:
             menuitem = await self.gui.menu(
@@ -160,6 +162,10 @@ class Specter:
                 await self._install_memorycard(result)
             elif menuitem == 3:
                 await self._delete_memorycard()
+            elif menuitem == 4:
+                await self._install_seedkeeper()
+            elif menuitem == 5:
+                await self._delete_seedkeeper()
 
     async def _show_card_details(self):
         """Show card probe results and registry dump."""
@@ -226,6 +232,134 @@ class Specter:
             package_aid = unhexlify("B00B5111CB")
             try:
                 delete_aid(session, package_aid)
+            except Exception:
+                pass
+
+            scr.set_done()
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            await scr.result()
+        except Exception as e:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            scr.set_error("Delete failed:\n%s" % str(e))
+            await scr.result()
+
+    async def _install_seedkeeper(self):
+        """Install SeedKeeper applet from DGP file on filesystem."""
+        from keystore.javacard.gp.profiles import APPLET_AIDS
+
+        sk_info = APPLET_AIDS.get("seedkeeper")
+        dgp_path = sk_info["dgp_file"] if sk_info else "/flash/gp/SeedKeeper.dgp"
+
+        try:
+            f = open(dgp_path, "rb")
+            f.close()
+        except Exception:
+            await self.gui.alert(
+                "SeedKeeper.dgp not found",
+                "Copy the DGP file to the device:\n\n"
+                "mpremote cp SeedKeeper.dgp :%s" % dgp_path
+            )
+            return
+
+        if not await self.gui.prompt(
+            "Install SeedKeeper?",
+            "This will install the SeedKeeper applet\n"
+            "on the JavaCard.\n\n"
+            "The card will be modified.\n\n"
+            "Continue?",
+        ):
+            return
+
+        from gui.screens.provisioning import ProvisioningProgressScreen
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
+        from keystore.javacard.gp.scp02 import open_session
+        from keystore.javacard.gp.loader import install_from_dgp, verify_install
+        from binascii import unhexlify
+
+        scr = ProvisioningProgressScreen("Install SeedKeeper")
+        await self.gui.load_screen(scr)
+
+        try:
+            scr.set_step("Loading DGP file...")
+            f = open(dgp_path, "rb")
+            dgp_data = f.read()
+            f.close()
+
+            scr.set_step("Connecting to card...")
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+
+            scr.set_step("Authenticating...")
+            session = open_session(conn, JCOP4_PROFILE)
+
+            scr.set_step("Installing (%d bytes)..." % len(dgp_data))
+            sd_aid = unhexlify("A000000151000000")
+            pkg_aid = install_from_dgp(session, dgp_data, sd_aid)
+
+            scr.set_step("Verifying...")
+            sk_inst = unhexlify("536565644b656570657201")
+            if verify_install(session, sk_inst):
+                scr.set_done()
+            else:
+                scr.set_error("Verification failed")
+
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            await scr.result()
+        except Exception as e:
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            scr.set_error("Install failed:\n%s" % str(e))
+            await scr.result()
+
+    async def _delete_seedkeeper(self):
+        """Delete SeedKeeper applet from card."""
+        if not await self.gui.prompt(
+            "Delete SeedKeeper?",
+            "This will remove the SeedKeeper applet\n"
+            "and all its secrets from the card.\n\n"
+            "Are you sure?",
+            warning="This action cannot be undone!",
+        ):
+            return
+
+        from gui.screens.provisioning import ProvisioningProgressScreen
+        from keystore.javacard.util import get_connection
+        from keystore.javacard.gp.profiles import JCOP4_PROFILE
+        from keystore.javacard.gp.scp02 import open_session
+        from keystore.javacard.gp.deleter import delete_aid
+        from binascii import unhexlify
+
+        scr = ProvisioningProgressScreen("Delete SeedKeeper")
+        await self.gui.load_screen(scr)
+
+        try:
+            scr.set_step("Connecting to card...")
+            conn = get_connection()
+            conn.connect(conn.T1_protocol)
+
+            scr.set_step("Authenticating...")
+            session = open_session(conn, JCOP4_PROFILE)
+
+            scr.set_step("Deleting applet...")
+            sk_inst = unhexlify("536565644b656570657201")
+            delete_aid(session, sk_inst)
+
+            scr.set_step("Deleting package...")
+            sk_pkg = unhexlify("536565644b6565706572")
+            try:
+                delete_aid(session, sk_pkg)
             except Exception:
                 pass
 
