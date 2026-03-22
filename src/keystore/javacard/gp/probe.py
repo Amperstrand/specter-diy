@@ -49,8 +49,10 @@ def probe_card(connection):
     except Exception:
         return result
 
+    from binascii import hexlify
     atr = connection.getATR()
     result["atr"] = atr
+    result["atr_hex"] = hexlify(atr).decode()
 
     try:
         _check_known_applets(connection, result)
@@ -74,6 +76,7 @@ def probe_card(connection):
 
     result["profile"] = profile
 
+    session = None
     try:
         session = open_session(connection, profile)
         result["kind"] = "gp_supported"
@@ -94,6 +97,11 @@ def probe_card(connection):
     except Exception:
         result["kind"] = "unknown"
 
+    if session is not None:
+        try:
+            session.end_session()
+        except Exception:
+            pass
     try:
         connection.disconnect()
     except Exception:
