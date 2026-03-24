@@ -4,6 +4,8 @@ Satochip Secure Channel - Crypto primitives for SeedKeeper and Satochip applets.
 Implements ECDH key exchange, AES-CBC encryption, and HMAC-SHA1 authentication.
 This is the Satochip/SeedKeeper protocol, distinct from MemoryCard's SecureChannel
 (which uses HMAC-SHA256 and a different key derivation scheme).
+
+Protocol reference: Toporin/pysatochip CardConnector.py + SecureChannel.py
 """
 
 import hashlib
@@ -13,6 +15,7 @@ from rng import get_random_bytes
 
 
 AES_BLOCK = 16
+MAC_SIZE = 20
 
 
 def hmac_sha1(key: bytes, msg: bytes) -> bytes:
@@ -44,10 +47,47 @@ def pkcs7_unpad(data: bytes) -> bytes:
     return data[:-padding_len]
 
 
+def der_sig_to_compact(der_sig: bytes) -> bytes:
+    """Convert a DER-encoded ECDSA signature to 64-byte compact format.
+
+    DER format: 0x30 <total_len> 0x02 <r_len> <r> 0x02 <s_len> <s>
+    Compact format: r(32 bytes, big-endian) + s(32 bytes, big-endian)
+
+    Used for pysatochip challenge-response verification, which returns
+    DER-encoded signatures per the Satochip protocol specification.
+    """
+    idx = 0
+    if der_sig[idx] != 0x30:
+        raise ValueError("Invalid DER signature: missing SEQUENCE tag")
+    idx += 1
+    total_len = der_sig[idx]
+    idx += 1
+
+    if der_sig[idx] != 0x02:
+        raise ValueError("Invalid DER signature: missing INTEGER tag for r")
+    idx += 1
+    r_len = der_sig[idx]
+    idx += 1
+    r = der_sig[idx:idx + r_len]
+    idx += r_len
+
+    if der_sig[idx] != 0x02:
+        raise ValueError("Invalid DER signature: missing INTEGER tag for s")
+    idx += 1
+    s_len = der_sig[idx]
+    idx += 1
+    s = der_sig[idx:idx + s_len]
+
+    r_padded = (b'\x00' * (32 - len(r))) + r
+    s_padded = (b'\x00' * (32 - len(s))) + s
+    return r_padded + s_padded
+
+
 class SatochipSecureChannel:
     """Secure channel for Satochip/SeedKeeper JavaCard applets.
 
     ECDH key exchange with AES-CBC encryption and HMAC-SHA1 authentication.
+    Matches pysatochip SecureChannel protocol (Toporin/pysatochip).
     """
 
     def __init__(self):
@@ -88,9 +128,16 @@ class SatochipSecureChannel:
         coordx_size = (resp_data[0] << 8) | resp_data[1]
         coordx = bytes(resp_data[2:2 + coordx_size])
 
-        card_pubkey_compressed = bytes([0x02]) + coordx
-
-        card_pubkey = secp256k1.ec_pubkey_parse(card_pubkey_compressed)
+        card_pubkey = None
+        for prefix in (b'\x02', b'\x03'):
+            card_pubkey_compressed = prefix + coordx
+            try:
+                card_pubkey = secp256k1.ec_pubkey_parse(card_pubkey_compressed)
+                break
+            except Exception:
+                continue
+        if card_pubkey is None:
+            raise ValueError("Failed to parse card pubkey from x-coordinate")
         self.card_pubkey = card_pubkey
 
         shared_point = secp256k1.ec_pubkey_parse(
@@ -128,17 +175,80 @@ class SatochipSecureChannel:
         mac_data = iv + len(ciphertext).to_bytes(2, 'big') + ciphertext
         mac = hmac_sha1(self.mac_key, mac_data)
 
-        payload = iv + len(ciphertext).to_bytes(2, 'big') + ciphertext + (20).to_bytes(2, 'big') + mac
+        payload = iv + len(ciphertext).to_bytes(2, 'big') + ciphertext + MAC_SIZE.to_bytes(2, 'big') + mac
         wrapped = bytes([cla, 0x82, 0x00, 0x00, len(payload)]) + payload
 
         self.iv_counter += 2
         return wrapped
 
     def decrypt_response(self, encrypted_response: bytes) -> bytes:
+        if not self.is_initialized:
+            raise ValueError("Secure channel not initialized")
+
+        if len(encrypted_response) < 18:
+            raise ValueError("Encrypted response too short")
+
         card_iv = encrypted_response[:16]
         data_size = int.from_bytes(encrypted_response[16:18], 'big')
+
+        if 18 + data_size + 2 > len(encrypted_response):
+            raise ValueError("Encrypted response truncated: expected %d data bytes, have %d" % (data_size, len(encrypted_response) - 18))
+
         ciphertext = encrypted_response[18:18 + data_size]
+
+        mac_len_offset = 18 + data_size
+        if mac_len_offset + 2 > len(encrypted_response):
+            raise ValueError("Encrypted response missing MAC length field")
+        mac_size = int.from_bytes(encrypted_response[mac_len_offset:mac_len_offset + 2], 'big')
+
+        if mac_len_offset + 2 + mac_size > len(encrypted_response):
+            raise ValueError("Encrypted response truncated: expected %d MAC bytes, have %d" % (mac_size, len(encrypted_response) - mac_len_offset - 2))
+        received_mac = encrypted_response[mac_len_offset + 2:mac_len_offset + 2 + mac_size]
+
+        mac_data = card_iv + encrypted_response[16:18] + ciphertext
+        expected_mac = hmac_sha1(self.mac_key, mac_data)
+        if received_mac != expected_mac:
+            raise ValueError("MAC verification failed on card response")
 
         cipher = aes(self.aes_key, 2, card_iv)
         plaintext = cipher.decrypt(ciphertext)
         return pkcs7_unpad(plaintext)
+
+    def verify_card_authenticity(self, connection, cla=0xB0):
+        """Perform ECDSA challenge-response to verify card identity.
+
+        Sends a 32-byte random challenge to the card via INS 0x9A. The card
+        responds with its own 32-byte challenge + a DER-encoded ECDSA signature
+        over SHA-256("Challenge:" || card_challenge || host_challenge).
+
+        Returns True if the card's ECDSA signature is valid, proving the card
+        holds the private key corresponding to the pubkey from the ECDH handshake.
+
+        This matches pysatochip's card_challenge_response_pki() protocol but
+        uses the MicroPython secp256k1 binding directly instead of the ecdsa library.
+        """
+        if self.card_pubkey is None:
+            raise ValueError("No card pubkey — call initiate() first")
+
+        host_challenge = get_random_bytes(32)
+
+        apdu = bytes([cla, 0x9A, 0x00, 0x00, 0x20]) + host_challenge
+        data = connection.transmit(apdu)
+        resp_data = data[0]
+        sw1, sw2 = data[1], data[2]
+        if sw1 != 0x90 or sw2 != 0x00:
+            raise ValueError('CHALLENGE_RESPONSE failed: SW={:02X}{:02X}'.format(sw1, sw2))
+
+        card_challenge = bytes(resp_data[0:32])
+        sig_size = (resp_data[32] << 8) | resp_data[33]
+        sig_der = bytes(resp_data[34:34 + sig_size])
+
+        challenge = hashlib.sha256(b"Challenge:" + card_challenge + host_challenge).digest()
+
+        sig_compact = der_sig_to_compact(sig_der)
+
+        pubkey_raw = secp256k1.ec_pubkey_serialize(self.card_pubkey, secp256k1.EC_UNCOMPRESSED)[1:]
+        if len(pubkey_raw) != 64:
+            raise ValueError("Unexpected pubkey length: %d" % len(pubkey_raw))
+
+        return secp256k1.ecdsa_verify(sig_compact, challenge, pubkey_raw)
