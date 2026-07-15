@@ -24,10 +24,9 @@ seedkeeper:
 memorycard:
   name: MemoryCard
   version: "1.0"
-  cap_url: TBD
-  cap_sha256: TBD
-  dgp_sha256: TBD
+  cap_url: https://github.com/Amperstrand/specter-javacard/releases/download/latest/MemoryCardApplet.cap
+  cap_sha256: 4ba51892ac2080f2bbadffbe141ac043512f311a60186d1d0aa1b8ef2d0f2328
+  dgp_sha256: ab52bb9cde9225b58cfeab32dbd31e5da5b60accd8d012a5434e07e80f6f4c44
   dgp_path: /flash/gp/MemoryCard.dgp
   package_aid: "B00B5111CB"
   applet_aid: "B00B5111CB01"
-  note: Currently frozen as memorycard_cap.py. Transition to DGP pending SD card support.

@@ -209,6 +209,11 @@ In this mode device can only operate when the smartcard is inserted!"""
     def lock(self):
         """Locks the keystore, requires PIN to unlock"""
         self.applet.lock()
+        try:
+            self.connection.disconnect()
+        except Exception:
+            pass
+        self.connected = False
         return self.is_locked
 
     def _change_pin(self, old_pin, new_pin):

@@ -103,3 +103,20 @@ class ProvisioningDetailsScreen(Screen):
     def set_registry(self, text):
         self.registry_label.set_text(text)
         update()
+
+    def update_info(self, info):
+        from binascii import hexlify
+        kind = info.get("kind", "unknown")
+        atr = info.get("atr", b"")
+        applets = info.get("applets", [])
+        lines = "Type: %s" % kind
+        if atr:
+            lines += "\nATR: %s" % hexlify(atr).decode()
+        if applets:
+            lines += "\n\nDetected:"
+            for name in applets:
+                lines += "\n  %s" % name
+        else:
+            lines += "\n\nNo known applets"
+        self.info_label.set_text(lines)
+        update()

@@ -32,7 +32,11 @@ def scan_card_applets(connection) -> dict:
 
     result["card_present"] = True
     try:
-        connection.connect(connection.T1_protocol)
+        conn.disconnect()
+    except Exception:
+        pass
+    try:
+        conn.connect(conn.T1_protocol)
     except Exception as e:
         result["status"] = "Connect failed: " + str(e)
         return result

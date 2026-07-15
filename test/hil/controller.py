@@ -532,6 +532,90 @@ class HardwareController:
         mnemonic = "abandon " * 11 + "about"
         self._send_with_retry(mnemonic, "Mnemonic", require_change=True)
 
+    def _load_memorycard(self):
+        """Load via MemoryCard keystore (PIN entry only).
+
+        MemoryCard.is_available() returns True when the applet is
+        installed with no PIN set. After boot:
+        1. PIN setup screen appears (choose + confirm)
+        2. initmenu appears
+
+        If PIN is already set, is_available() returns False and
+        the device won't boot as MemoryCard. Use GP commands to
+        delete and reinstall if needed.
+        """
+        print("Loading MemoryCard keystore...")
+        self._send_with_retry("1234", "PIN choose", require_change=True)
+        time.sleep(0.5)
+        self._send_with_retry("1234", "PIN confirm", require_change=True)
+        time.sleep(1)
+        for _ in range(15):
+            screen = self.gui.screen()
+            if b"OK:SCREEN:Menu:" in screen:
+                print("  Reached init menu (MemoryCard)")
+                return
+            if b"OK:SCREEN:Alert:" in screen:
+                self.gui.send(True)
+                time.sleep(1)
+                continue
+            time.sleep(0.3)
+        raise RuntimeError("Did not reach init menu after MemoryCard PIN setup")
+
+    def mc_probe(self):
+        resp = self.gui.command("TEST_GP_PROBE", timeout=10)
+        if b"OK:GP_PROBE:" in resp:
+            info = resp.split(b"OK:GP_PROBE:", 1)[1].strip().decode()
+            print(f"  Card probe: {info}")
+            return True, info
+        print(f"  Card probe failed: {resp}")
+        return False, resp.decode(errors='replace')
+
+    def mc_install(self, path="/flash/gp/MemoryCard.dgp"):
+        resp = self.gui.command(f"TEST_GP_INSTALL:{path}", timeout=30)
+        if b"OK:GP_INSTALL:success" in resp:
+            print(f"  MemoryCard installed: {resp.decode(errors='replace')}")
+            return True
+        print(f"  MemoryCard install failed: {resp.decode(errors='replace')}")
+        return False
+
+    def mc_verify(self, aid_hex="B00B5111CB01"):
+        resp = self.gui.command(f"TEST_GP_VERIFY:{aid_hex}", timeout=5)
+        if b"installed" in resp:
+            print(f"  MemoryCard verified installed: {aid_hex}")
+            return True
+        print(f"  MemoryCard not installed: {resp.decode(errors='replace')}")
+        return False
+
+    def mc_delete(self):
+        ok = True
+        resp = self.gui.command("TEST_GP_DELETE:B00B5111CB01", timeout=10)
+        if b"OK:GP_DELETED" not in resp:
+            print(f"  Delete applet failed: {resp.decode(errors='replace')}")
+            ok = False
+        else:
+            print("  Applet deleted")
+        resp = self.gui.command("TEST_GP_DELETE:B00B5111CB", timeout=10)
+        if b"OK:GP_DELETED" not in resp:
+            print(f"  Delete package failed: {resp.decode(errors='replace')}")
+            ok = False
+        else:
+            print("  Package deleted")
+        return ok
+
+    def mc_status(self):
+        resp = self.gui.command("TEST_GP_STATUS", timeout=10)
+        if b"OK:GP_STATUS:" in resp:
+            return resp.split(b"OK:GP_STATUS:", 1)[1].strip().decode(errors='replace')
+        return resp.decode(errors='replace')
+
+    def mc_card_reset(self):
+        resp = self.gui.command("TEST_CARD_RESET", timeout=10)
+        if b"OK:CARD_RESET" in resp:
+            print("  Card reset OK")
+            return True
+        print(f"  Card reset failed: {resp.decode(errors='replace')}")
+        return False
+
     def start(self):
         print("Resetting device...")
         self.gui = SerialSocket(self.debug_port, baudrate=9600, timeout=5)
@@ -588,6 +672,8 @@ class HardwareController:
 
         if self.keystore_type.lower() == "seedkeeper":
             self._load_seedkeeper()
+        elif self.keystore_type.lower() == "smartcard":
+            self._load_memorycard()
         else:
             self._load_internal_flash()
         self._wait_for_usb_vcp()

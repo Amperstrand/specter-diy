@@ -71,18 +71,25 @@ def install_for_load(session, package_aid, sd_aid):
     return resp_data
 
 
-def load_cap(session, cap_data, block_size=LOAD_BLOCK_SIZE):
+def load_cap(session, cap_data, block_size=LOAD_BLOCK_SIZE, progress_cb=None):
     """Send CAP file data via chunked LOAD commands.
 
     First block includes C4 header with total CAP length,
     followed by as much CAP data as fits within block_size.
     Subsequent blocks are raw continuation data.
     Last block has P1=0x80.
+
+    progress_cb(block_num, total_blocks) is called after each block.
     """
     cap_len = len(cap_data)
     c4_header = bytes([0xC4]) + _encode_length(cap_len)
     header_size = len(c4_header)
     first_block_data_size = block_size - header_size
+
+    if progress_cb:
+        first_data = first_block_data_size
+        total = 1 + (cap_len - first_data + block_size - 1) // block_size
+        total = max(total, 1)
 
     offset = 0
     seq = 0
@@ -105,6 +112,9 @@ def load_cap(session, cap_data, block_size=LOAD_BLOCK_SIZE):
             raise GPLoadError("LOAD block %d failed (offset %d/%d): SW=%02X%02X"
                               % (seq, offset, cap_len, sw1, sw2))
 
+        if progress_cb:
+            progress_cb(seq + 1, total)
+
         seq = (seq + 1) & 0xFF
         if seq == 0:
             raise GPLoadError("LOAD: sequence counter overflow (>255 blocks)")
@@ -122,7 +132,8 @@ def install_for_install(session, package_aid, applet_aid, instance_aid,
 
 
 def install_applet(session, cap_data, package_aid, applet_aid, instance_aid,
-                   sd_aid, privileges=b"\x00", install_params=b"\xC9\x00"):
+                   sd_aid, privileges=b"\x00", install_params=b"\xC9\x00",
+                   progress_cb=None):
     """Full applet installation flow.
 
     1. INSTALL [for load]
@@ -130,7 +141,7 @@ def install_applet(session, cap_data, package_aid, applet_aid, instance_aid,
     3. INSTALL [for install and make selectable]
     """
     install_for_load(session, package_aid, sd_aid)
-    load_cap(session, cap_data)
+    load_cap(session, cap_data, progress_cb=progress_cb)
     install_for_install(session, package_aid, applet_aid, instance_aid,
                         privileges, install_params)
 
@@ -202,7 +213,8 @@ def extract_applet_aid(dgp_data):
 
 
 def install_from_dgp(session, dgp_data, sd_aid,
-                      privileges=b"\x00", install_params=b"\xC9\x00"):
+                      privileges=b"\x00", install_params=b"\xC9\x00",
+                      progress_cb=None):
     """Install applet from DGP data with auto-derived AIDs.
 
     Parses package AID from DGP Header and applet AID from Applet.cap,
@@ -216,7 +228,8 @@ def install_from_dgp(session, dgp_data, sd_aid,
     applet_aid = extract_applet_aid(dgp_data)
     instance_aid = applet_aid
     install_applet(session, dgp_data, pkg_aid, applet_aid, instance_aid,
-                   sd_aid, privileges, install_params)
+                   sd_aid, privileges, install_params,
+                   progress_cb=progress_cb)
     return pkg_aid
 
 

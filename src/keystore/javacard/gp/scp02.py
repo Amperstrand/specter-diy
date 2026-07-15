@@ -198,6 +198,14 @@ class SCP02Session:
         apdu = bytes([cla, ins, p1, p2, lc]) + data + bytes([0x00])
         return _transmit_raw(self.conn, apdu)
 
+    def end_session(self):
+        """Send GP END SESSION to cleanly terminate secure channel."""
+        try:
+            apdu = self.wrap_command(0x80, 0x82, 0x80, 0x00)
+            _transmit_raw(self.conn, apdu)
+        except Exception:
+            pass
+
 
 def open_session(conn, profile):
     """Open an SCP02 secure channel with the card.
