@@ -25,7 +25,7 @@ from gui.screens.settings import HostSettings
 from gui.screens.mnemonic import MnemonicPrompt
 
 # small helper functions
-from helpers import gen_mnemonic, fix_mnemonic
+from helpers import gen_mnemonic, fix_mnemonic, test_output_keystore_selected
 from errors import BaseError
 
 
@@ -157,6 +157,7 @@ class Specter:
         # if we have fixed keystore - just use it
         if len(self.keystores) == 1:
             self.keystore = self.keystores[0]()
+            test_output_keystore_selected(self.keystore.NAME)
             return
         # checking the first available keystore
         keystore_cls = None
@@ -170,6 +171,7 @@ class Specter:
             # if keystore_cls is None:
             #     await asyncio.sleep_ms(50)
         self.keystore = keystore_cls()
+        test_output_keystore_selected(self.keystore.NAME)
 
     async def setup(self):
         try:

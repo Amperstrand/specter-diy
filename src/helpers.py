@@ -215,3 +215,94 @@ else:
     _conv_time = utime.gmtime if hasattr(utime, "gmtime") else utime.localtime
     def conv_time(t):
         return _conv_time(t - _UNIX_EPOCH_OFFSET)
+
+
+
+# =============================================================================
+# Structured Test Output
+# =============================================================================
+
+import json
+
+# Test mode flag - set to True for test builds
+TEST_MODE = False
+
+# Test card whitelist - only used when TEST_MODE is True
+# Format: { 'card_atr_hex': { 'pin': '1234', 'description': 'Test card #1' } }
+TEST_CARDS = {}
+
+def test_output(event, data=None):
+    """
+    Output structured test event for automated testing.
+    Format: [TEST] <json>
+    
+    Args:
+        event: Event name (e.g., 'card_detected', 'pin_verify', 'mnemonic_loaded')
+        data: Optional dict with event details
+    """
+    if data is None:
+        data = {}
+    data['event'] = event
+    try:
+        print('[TEST] ' + json.dumps(data))
+    except:
+        # Fallback if json fails
+        print('[TEST] event=' + event)
+
+def test_output_atr(atr_bytes):
+    """Output ATR in structured format"""
+    atr_hex = ' '.join('%02X' % b for b in atr_bytes)
+    test_output('atr', {'atr_hex': atr_hex, 'atr_raw': atr_bytes.hex()})
+
+def test_output_card_type(card_type, applet_name=None, aid=None):
+    """Output detected card type"""
+    data = {'card_type': card_type}
+    if applet_name:
+        data['applet'] = applet_name
+    if aid:
+        data['aid'] = aid.hex() if isinstance(aid, bytes) else aid
+    test_output('card_detected', data)
+
+def test_output_pin_state(attempts_remaining=None, attempts_max=None, is_locked=None):
+    """Output PIN state"""
+    data = {}
+    if attempts_remaining is not None:
+        data['attempts_remaining'] = attempts_remaining
+    if attempts_max is not None:
+        data['attempts_max'] = attempts_max
+    if is_locked is not None:
+        data['is_locked'] = is_locked
+    test_output('pin_state', data)
+
+def test_output_pin_result(success, error=None):
+    """Output PIN verification result"""
+    data = {'success': success}
+    if error:
+        data['error'] = error
+    test_output('pin_result', data)
+
+def test_output_mnemonic_loaded(fingerprint=None, secret_id=None, label=None):
+    """Output mnemonic load result"""
+    data = {'loaded': True}
+    if fingerprint:
+        data['fingerprint'] = fingerprint
+    if secret_id is not None:
+        data['secret_id'] = secret_id
+    if label:
+        data['label'] = label
+    test_output('mnemonic_loaded', data)
+
+def test_output_error(stage, message):
+    """Output error during testing"""
+    test_output('error', {'stage': stage, 'message': message})
+
+def test_output_keystore_selected(keystore_name):
+    """Output when keystore is selected"""
+    test_output('keystore_selected', {'keystore': keystore_name})
+
+def test_output_secure_channel(established, card_pubkey=None):
+    """Output secure channel status"""
+    data = {'established': established}
+    if card_pubkey:
+        data['card_pubkey'] = card_pubkey.hex() if isinstance(card_pubkey, bytes) else card_pubkey
+    test_output('secure_channel', data)

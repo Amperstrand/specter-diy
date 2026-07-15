@@ -7,6 +7,13 @@ from platform import CriticalErrorWipeImmediately
 import asyncio
 from gui.screens import Alert, Progress, Menu, Prompt, PinScreen
 
+# Structured test output helpers
+from helpers import (
+    test_output, test_output_atr, test_output_card_type,
+    test_output_pin_state, test_output_pin_result,
+    test_output_mnemonic_loaded, test_output_error,
+    test_output_keystore_selected, test_output_secure_channel,
+)
 
 class SeedKeeper(RAMKeyStore):
     """
@@ -48,21 +55,29 @@ class SeedKeeper(RAMKeyStore):
     @classmethod
     def is_available(cls):
         """Check if SeedKeeper card is available and responsive."""
-        print('[BootTrace][SeedKeeper] is_available() called')
+        test_output('probe_start', {'keystore': 'SeedKeeper'})
         if not cls.connection.isCardInserted():
+            test_output('probe_result', {'available': False, 'reason': 'no_card'})
             return False
         try:
             import time
             time.sleep_ms(20)  # Give card time to stabilize after previous disconnect
             cls.connection.connect(cls.connection.T1_protocol)
+            
+            # Capture and output ATR
+            atr = cls.connection.getATR()
+            test_output_atr(atr)
+            
             applet = SeedKeeperApplet(cls.connection)
             applet.select()
             applet.get_card_status()
             cls.connection.disconnect()
-            print('[BootTrace][SeedKeeper] is_available = True')
+            
+            test_output_card_type('SeedKeeper', applet_name='SeedKeeperApplet')
+            test_output('probe_result', {'available': True})
             return True
         except Exception as e:
-            print('[BootTrace][SeedKeeper] Probe failed:', e)
+            test_output_error('probe', str(e))
             cls.connection.disconnect()
             return False
 
@@ -91,15 +106,18 @@ class SeedKeeper(RAMKeyStore):
             success, attempts = self.applet.verify_pin(pin)
             if success:
                 self._pin_unlocked = True
+                test_output_pin_result(True)
                 return
             # Not successful - this shouldn't happen as verify_pin raises on failure
             if attempts is not None:
+                test_output_pin_result(False, f"Invalid PIN - {attempts} attempts left")
                 raise PinError("Invalid PIN!\n%d attempts left..." % attempts)
         except ISOException as e:
             # Handle specific ISO exceptions based on status word
             sw = str(e).lower()
             # Card is bricked - no more attempts
             if sw == "9c0c" or sw == "6983":
+                test_output_pin_result(False, "Card bricked - no more attempts")
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             # Wrong PIN: SW = 63Cx where x = remaining attempts
             if sw.startswith("63c") and len(sw) == 4:
@@ -108,16 +126,21 @@ class SeedKeeper(RAMKeyStore):
                 except ValueError:
                     attempts_left = None
                 if attempts_left is not None:
+                    test_output_pin_result(False, f"Invalid PIN - {attempts_left} attempts left")
                     raise PinError(
                         "Invalid PIN!\n%d attempts left..." % attempts_left
                     )
+                test_output_pin_result(False, "Invalid PIN")
                 raise PinError("Invalid PIN!")
             # Any other ISO error is unexpected here
+            test_output_error('pin_verify', f"ISO exception: {sw}")
             raise
         except AppletException as e:
             # Handle applet-level exceptions
             if "6983" in str(e) or "9c0c" in str(e):
+                test_output_pin_result(False, "Card bricked - no more attempts")
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
+            test_output_error('pin_verify', str(e))
             raise
     async def unlock(self):
         """Override: prompt for PIN via touchscreen, then auto-load mnemonic."""
@@ -129,13 +152,14 @@ class SeedKeeper(RAMKeyStore):
         # Query card for PIN attempts remaining (byte 4 of card_status response)
         # get_card_status() works WITHOUT secure channel
         pin_attempts = None
+        pin_attempts_max = 5  # SeedKeeper default
         try:
             resp_data, sw1, sw2 = self.applet.get_card_status()
             if len(resp_data) >= 8:
                 pin_attempts = resp_data[4]
-                print('[BootTrace][SeedKeeper] PIN attempts remaining:', pin_attempts)
+                test_output_pin_state(attempts_remaining=pin_attempts, attempts_max=pin_attempts_max, is_locked=True)
         except Exception as e:
-            print('[BootTrace][SeedKeeper] Failed to get card status:', e)
+            test_output_error('get_pin_state', str(e))
         
         # PIN prompt loop with error handling
         while self.is_locked:
@@ -223,6 +247,13 @@ class SeedKeeper(RAMKeyStore):
             self.show_loader('Loading mnemonic from card...')
             mnemonic = self.applet.get_bip39_secret(secret_id=selected['id'], secret_type=selected['type'])
             self.set_mnemonic(mnemonic, "")
+            
+            # Structured test output for mnemonic loaded
+            test_output_mnemonic_loaded(
+                fingerprint=self.fingerprint.hex() if self.fingerprint else None,
+                secret_id=selected['id'],
+                label=selected['label']
+            )
             print('[BootTrace][SeedKeeper] Mnemonic loaded successfully')
             
         except AppletException as e:
@@ -259,25 +290,37 @@ class SeedKeeper(RAMKeyStore):
                         pass
                     time.sleep_ms(50)
                     self.connection.connect(protocol)
+                    
+                    # Structured test output for ATR
+                    atr = self.connection.getATR()
+                    test_output_atr(atr)
+                    print('[BootTrace][SeedKeeper] ATR:', ' '.join('%02X' % b for b in atr))
+                    
                     connect_error = None
                     print('[BootTrace][SeedKeeper] connected using protocol:', protocol)
+                    test_output('protocol', {'protocol': 'T=1' if protocol == self.connection.T1_protocol else 'T=0'})
                     break
                 except Exception as e:
                     connect_error = e
                     print('[BootTrace][SeedKeeper] connect failed:', type(e).__name__, e)
+                    test_output_error('connect', str(e))
             if connect_error is not None:
                 raise KeyStoreError("Failed to communicate with the card: %s" % str(connect_error))
             try:
                 self.applet.select()
+                test_output_card_type('SeedKeeper', applet_name='SeedKeeperApplet')
             except Exception as e:
                 print('[BootTrace][SeedKeeper] select failed:', type(e).__name__, e)
+                test_output_error('applet_select', str(e))
                 raise KeyStoreError("Failed to select the applet")
 
             self.show_loader(title="Establishing secure channel...")
             try:
                 self.applet.init_secure_channel()
+                test_output_secure_channel(True)
             except Exception as e:
                 print('[BootTrace][SeedKeeper] secure channel init failed:', type(e).__name__, e)
+                test_output_secure_channel(False, error=str(e))
                 raise
 
             self.connected = True

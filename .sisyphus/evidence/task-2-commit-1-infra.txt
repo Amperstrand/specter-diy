@@ -1,0 +1,26 @@
+Task 2: Infrastructure Commit - Evidence
+========================================
+
+COMMIT: 0f728fdb427774673dddb8ccd103a28a02ccd580
+MESSAGE: feat(keystore): add memorycard disconnect fix and can_export_seed property
+
+FILES CHANGED:
+--------------
+src/keystore/memorycard.py | 1 +
+src/keystore/ram.py | 9 +++++++++
+2 files changed, 10 insertions(+)
+
+DIFFS:
+------
+memorycard.py: Added cls.connection.disconnect() in is_available() except block
+ram.py: Added can_export_seed property returning True
+
+VERIFICATION:
+-------------
+[x] git diff 8131bc9..HEAD --stat shows 2 files, 10 insertions
+[x] memorycard.py has exactly 1 added line (disconnect call)
+[x] ram.py has can_export_seed property with docstring
+[x] python3 ast.parse() passes for both files
+[x] Commit message matches expected format
+
+STATUS: COMPLETE

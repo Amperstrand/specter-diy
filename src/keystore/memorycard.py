@@ -2,10 +2,11 @@ from .core import KeyStoreError, PinError
 from .ram import RAMKeyStore
 from .javacard.applets.memorycard import MemoryCardApplet, SecureError
 from .javacard.util import get_connection
+from .smartcard_mixin import SmartcardTestMixin, CARD_TYPE_MEMORYCARD
 from platform import CriticalErrorWipeImmediately
 import platform
 from embit import bip39
-from helpers import tagged_hash, aead_encrypt, aead_decrypt
+from helpers import tagged_hash, aead_encrypt, aead_decrypt, test_output_atr, test_output_card_type, test_output_pin_result, test_output_secure_channel
 import hmac
 from gui.screens import Alert, Progress, Menu, Prompt
 import asyncio
@@ -14,7 +15,7 @@ from binascii import hexlify
 import lvgl as lv
 
 
-class MemoryCard(RAMKeyStore):
+class MemoryCard(SmartcardTestMixin, RAMKeyStore):
     """
     KeyStore that stores secrets on a smartcard
     using MemoryCard Java applet.
@@ -26,6 +27,7 @@ class MemoryCard(RAMKeyStore):
 
     NAME = "Smartcard"
     COLOR = "00CAF1"
+    CARD_TYPE = CARD_TYPE_MEMORYCARD
     NOTE = """Saves encryption key and Bitcoin key on a PIN-protected external smartcard (requires devkit).
 In this mode device can only operate when the smartcard is inserted!"""
     # constants for secret storage
@@ -52,6 +54,10 @@ In this mode device can only operate when the smartcard is inserted!"""
         if not cls.connection.isCardInserted():
             return False
         try:
+            atr = cls.connection.getATR()
+            test_output_atr(atr)
+            test_output_card_type(CARD_TYPE_MEMORYCARD, applet_name='MemoryCard', aid='B0 0B 51 11 CB 01')
+            print(f'[BootTrace][MemoryCard] is_available() - ATR:', ' '.join('%02X' % b for b in atr))
             cls.connection.connect(cls.connection.T1_protocol)
             applet = MemoryCardApplet(cls.connection)
             applet.select()
@@ -117,13 +123,16 @@ In this mode device can only operate when the smartcard is inserted!"""
         """
         try:
             self.applet.unlock(pin)
+            self._output_pin_success()
         except SecureError as e:
             if str(e) == "0502":  # wrong PIN
+                self._output_pin_failure("Invalid PIN", attempts_left=self.pin_attempts_left)
                 raise PinError(
                     "Invalid PIN!\n%d of %d attempts left..."
                     % (self.pin_attempts_left, self.pin_attempts_max)
                 )
             elif str(e) == "0503":  # bricked
+                self._output_pin_bricked()
                 # wipe is happening automatically on this exception
                 raise CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!")
             else:
@@ -319,13 +328,16 @@ In this mode device can only operate when the smartcard is inserted!"""
             # connect and select applet
             try:
                 self.connection.connect(self.connection.T1_protocol)
+                self._output_protocol(self.connection.T1_protocol)
             except:
                 raise KeyStoreError("Failed to communicate with the card.")
             try:
                 self.applet.select()
+                self._output_applet_select_success()
             except:
                 raise KeyStoreError("Failed to select the applet")
             self.applet.open_secure_channel()
+            self._output_secure_channel_success(self.applet.card_pubkey)
             self.connected = True
         self.applet.get_pin_status()
         if check_pin and self.is_locked:
