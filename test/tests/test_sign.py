@@ -1,4 +1,5 @@
 from unittest import TestCase
+import unittest
 from .util import get_keystore, get_wallets_app, clear_testdir, check_sigs
 from embit.liquid.networks import NETWORKS
 from embit.liquid.pset import PSET
@@ -76,6 +77,11 @@ class SignTest(TestCase):
         sig_count = wapp.manager.sign_psbtview(psbtv, b, wallets, None)
         self.assertTrue(check_sigs(PSBT.parse(b.getvalue()), PSBT.from_string(signed)))
 
+    @unittest.skipUnless(
+        hasattr(__import__('secp256k1'), 'pedersen_commitment_parse')
+        and not hasattr(__import__('secp256k1'), '__getattr__'),
+        "Liquid PSET test requires secp256k1-zkp native library",
+    )
     def test_pset(self):
         clear_testdir()
         mnemonic = "ceiling retire saddle forest engine address fancy option fruit destroy grid strategy"
