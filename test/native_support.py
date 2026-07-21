@@ -170,6 +170,9 @@ def setup_native_stubs():
         secp256k1.ecdsa_signature_normalize = lambda sig: sig
         secp256k1.ecdsa_verify = lambda sig, msg, pub: True
         secp256k1.ecdsa_sign_recoverable = lambda msghash, secret: bytes(65)
+    def _secp256k1_getattr(name):
+        return lambda *args, **kwargs: args[0] if args else None
+    secp256k1.__getattr__ = _secp256k1_getattr
 
     utime = _ensure_module("utime")
     if not hasattr(utime, "time"):
@@ -185,6 +188,41 @@ def setup_native_stubs():
         utime.mktime = _time.mktime
         utime.localtime = _time.localtime
         utime.gmtime = _time.gmtime
+
+    import shutil
+    _fw_platform = types.ModuleType("platform")
+    if not hasattr(_fw_platform, "maybe_mkdir"):
+        _fw_platform.maybe_mkdir = lambda path: os.makedirs(path, exist_ok=True)
+        def _delete_recursively(path, include_self=False):
+            shutil.rmtree(path, ignore_errors=True)
+            if not include_self:
+                os.makedirs(path, exist_ok=True)
+        _fw_platform.delete_recursively = _delete_recursively
+        _fw_platform.file_exists = lambda fname: os.path.exists(fname)
+        _fw_platform.fpath = lambda fname: fname
+        _fw_platform.sync = lambda: None
+        _fw_platform.reboot = lambda: None
+        _fw_platform.mount_sdram = lambda: None
+        _fw_platform.enable_usb = lambda: None
+        _fw_platform.disable_usb = lambda: None
+        _fw_platform.set_usb_mode = lambda **kwargs: None
+        _fw_platform.get_git_info = lambda: ("unknown", "unknown")
+        _fw_platform.get_version = lambda: "0.0.0-test"
+        _fw_platform.get_bootloader_lock_status = lambda: "unknown"
+        _fw_platform.get_build_type = lambda: "debug"
+        _fw_platform.get_firmware_boot_mode = lambda: "normal"
+        _fw_platform.get_flash_read_protection_status = lambda: "unknown"
+        _fw_platform.get_flash_write_protection_status = lambda: "unknown"
+        _fw_platform.get_preallocated_ram = lambda: (bytearray(1024 * 1024), 1024 * 1024)
+        _fw_platform.CriticalErrorWipeImmediately = type(
+            "CriticalErrorWipeImmediately", (Exception,), {}
+        )
+        _fw_platform.SDCard = type("SDCard", (), {})
+    _fw_platform.simulator = True
+    def _fw_platform_getattr(name):
+        return None
+    _fw_platform.__getattr__ = _fw_platform_getattr
+    sys.modules["platform"] = _fw_platform
 
     from app import BaseApp
 
