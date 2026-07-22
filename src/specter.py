@@ -221,7 +221,7 @@ class Specter:
             
             if keystore_cls is None:
                 # Fallback: should not happen, but handle gracefully
-                print(f'[Specter] Unknown card type in mapping: {card_type}')
+                print('[Specter] Unknown card type in mapping:', card_type)
                 await asyncio.sleep_ms(200)
         
         self.keystore = keystore_cls()
