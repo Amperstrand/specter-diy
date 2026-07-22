@@ -89,7 +89,7 @@ class CardDetector:
             # 0x9000 = success
             return sw == 0x9000
         except Exception as e:
-            print(f'[CardDetector] SELECT failed for AID {hexlify(aid).decode()}: {e}')
+            print('[CardDetector] SELECT failed for AID ' + str(hexlify(aid).decode()) + ': ' + str(e))
             return False
     
     def detect_card_type(self, disconnect_after=True) -> str:
@@ -116,7 +116,7 @@ class CardDetector:
         try:
             self.connection.connect(self.connection.T1_protocol)
         except Exception as e:
-            print(f'[CardDetector] Failed to connect: {e}')
+            print('[CardDetector] Failed to connect: ' + str(e))
             return None
         
         detected_type = 'unknown'
@@ -126,7 +126,7 @@ class CardDetector:
             for card_type, aid in self.DETECTION_ORDER:
                 if self._try_select_aid(aid):
                     detected_type = card_type
-                    print(f'[CardDetector] Detected card type: {card_type}')
+                    print('[CardDetector] Detected card type: ' + str(card_type))
                     break
             
             if detected_type == 'unknown':

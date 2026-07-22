@@ -54,9 +54,9 @@ class SecureAppletBase(Applet):
         Note: SELECT MUST be called BEFORE init_secure_channel().
         NEVER re-select after secure channel initialization.
         """
-        print(f"[{self.NAME}] Establishing secure channel...")
+        print("[" + str(self.NAME) + "] Establishing secure channel...")
         self.sc.initiate(self.conn)
-        print(f"[{self.NAME}] Secure channel established")
+        print("[" + str(self.NAME) + "] Secure channel established")
     
     def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
         """
@@ -94,7 +94,7 @@ class SecureAppletBase(Applet):
         
         # Handle 9c30 - Secure Channel Required (corrupted channel)
         if sw == b"\x9c\x30" and retry:
-            print(f"[{self.NAME}] Secure channel corrupted (9c30), re-establishing...")
+            print("[" + str(self.NAME) + "] Secure channel corrupted (9c30), re-establishing...")
             # Re-establish secure channel
             self.sc.initiate(self.conn)
             # Retry command once with fresh encryption
@@ -162,6 +162,6 @@ class SecureAppletBase(Applet):
         apdu_data = bytes([len(old_pin)]) + old_pin + bytes([len(new_pin)]) + new_pin
         inner_apdu = bytes([0xB0, 0x44, 0x00, 0x00, len(apdu_data)]) + apdu_data
         
-        print(f"[{self.NAME}] TX (encrypted): CHANGE_PIN")
+        print("[" + str(self.NAME) + "] TX (encrypted): CHANGE_PIN")
         self.secure_request(inner_apdu)
-        print(f"[{self.NAME}] PIN changed successfully")
+        print("[" + str(self.NAME) + "] PIN changed successfully")

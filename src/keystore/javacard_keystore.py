@@ -92,7 +92,7 @@ class JavaCardKeyStore(RAMKeyStore):
         if not self.connection.isCardInserted():
             # Wait for card
             scr = Progress(
-                f"{self.applet.NAME} card not inserted",
+                str(self.applet.NAME) + " card not inserted",
                 "Please insert the card...",
                 button_text="",
             )
@@ -151,7 +151,7 @@ class JavaCardKeyStore(RAMKeyStore):
             if len(resp_data) >= 8:
                 return resp_data[4]
         except Exception as e:
-            print(f'[{self.applet.NAME}] Failed to get card status:', e)
+            print('[' + self.applet.NAME + '] Failed to get card status:', e)
         return None
     
     def _unlock(self, pin):
@@ -169,7 +169,7 @@ class JavaCardKeyStore(RAMKeyStore):
                 return
             if attempts is not None:
                 raise PinError(
-                    f"Invalid PIN!\n{attempts} attempts left..."
+                    "Invalid PIN!\n" + str(attempts) + " attempts left..."
                 )
         except Exception as e:
             # Handle specific ISO exceptions
@@ -205,14 +205,14 @@ class JavaCardKeyStore(RAMKeyStore):
         # Query card for PIN attempts
         pin_attempts = self._get_pin_attempts()
         if pin_attempts:
-            print(f'[{self.applet.NAME}] PIN attempts remaining:', pin_attempts)
+            print('[' + self.applet.NAME + '] PIN attempts remaining:', pin_attempts)
         
         # PIN prompt loop
         while self.is_locked:
-            note = f"{pin_attempts} PIN attempts remaining" if pin_attempts else None
+            note = str(pin_attempts) + " PIN attempts remaining" if pin_attempts else None
             
             pin = await self.get_pin(
-                subtitle=f"{self.applet.NAME} card detected",
+                subtitle=str(self.applet.NAME) + " card detected",
                 note=note,
             )
             self.show_loader('Verifying PIN code...')
@@ -247,10 +247,10 @@ class JavaCardKeyStore(RAMKeyStore):
         """
         try:
             self.applet.change_pin(old_pin, new_pin)
-            print(f'[{self.applet.NAME}] PIN changed successfully')
+            print('[' + self.applet.NAME + '] PIN changed successfully')
         except Exception as e:
             err_str = str(e).lower()
             # Handle wrong old PIN
             if '63c' in err_str or 'wrong' in err_str or 'invalid' in err_str:
-                raise PinError(f"Invalid old PIN!")
-            raise KeyStoreError(f"Failed to change PIN: {e}")
+                raise PinError("Invalid old PIN!")
+            raise KeyStoreError("Failed to change PIN: " + str(e))
