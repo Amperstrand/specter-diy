@@ -15,7 +15,7 @@ def create_wallet(wname, d1: str, d2: str, rpc=None):
     # to add checksums
     d1 = rpc.getdescriptorinfo(d1)["descriptor"]
     d2 = rpc.getdescriptorinfo(d2)["descriptor"]
-    rpc.createwallet(wname, True, True)
+    rpc.createwallet(wallet_name=wname, disable_private_keys=True, blank=True, descriptors=True)
     w = rpc.wallet(wname)
     info = w.getwalletinfo()
     # bitcoin core uses descriptor wallets by default so importmulti may fail

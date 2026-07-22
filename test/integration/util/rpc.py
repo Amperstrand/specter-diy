@@ -35,7 +35,7 @@ def prepare_rpc():
             break
     wallets = rpc.listwallets()
     if "" not in wallets:
-        rpc.createwallet("")
+        rpc.createwallet(wallet_name="", disable_private_keys=True, blank=True, descriptors=True)
     w = rpc.wallet("")
     b = w.getbalance()
     addr = w.getnewaddress()

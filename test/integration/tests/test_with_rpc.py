@@ -31,7 +31,7 @@ class RPCTest(TestCase):
         # to add checksums
         d1 = rpc.getdescriptorinfo(d1)["descriptor"]
         d2 = rpc.getdescriptorinfo(d2)["descriptor"]
-        rpc.createwallet(wname, True, True)
+        rpc.createwallet(wallet_name=wname, disable_private_keys=True, blank=True, descriptors=True)
         w = rpc.wallet(wname)
         info = w.getwalletinfo()
         # bitcoin core uses descriptor wallets by default so importmulti may fail
@@ -240,27 +240,43 @@ class RPCTest(TestCase):
         # check it's found
         self.assertFalse(b"Can't find wallet" in res)
 
-        has_descriptor_support = "6. descriptors" in rpc.help("createwallet")
-        if has_descriptor_support:
-            rpc.createwallet(wname, True, True, "", False, False)
-        else:
-            rpc.createwallet(wname, True, True)
+        rpc.createwallet(wallet_name=wname, disable_private_keys=True, blank=True, descriptors=True)
         w = rpc.wallet(wname)
-        res = w.importmulti([{
-                "scriptPubKey": {"address": addr1},#d1.script_pubkey().data.hex(),
-                # "witnessscript": d1.witness_script().data.hex(),
-                # "pubkeys": [k.sec().hex() for k in d1.keys],
-                "internal": False,
-                "timestamp": "now",
-                "watchonly": True,
-            },{
-                "scriptPubKey": {"address": addr2},#d2.script_pubkey().data.hex(),
-                # "witnessscript": d2.witness_script().data.hex(),
-                # "pubkeys": [k.sec().hex() for k in d2.keys],
-                "internal": True,
-                "timestamp": "now",
-                "watchonly": True,
-            }],{"rescan": False})
+        info = w.getwalletinfo()
+        # bitcoin core uses descriptor wallets by default so importmulti may fail
+        use_descriptors = info.get("descriptors", False)
+        desc1_checksummed = rpc.getdescriptorinfo(str(d1))["descriptor"]
+        desc2_checksummed = rpc.getdescriptorinfo(str(d2))["descriptor"]
+        if not use_descriptors:
+            res = w.importmulti([{
+                    "desc": desc1_checksummed,
+                    "internal": False,
+                    "timestamp": "now",
+                    "watchonly": True,
+                    "range": [0, 10],
+                },{
+                    "desc": desc2_checksummed,
+                    "internal": True,
+                    "timestamp": "now",
+                    "watchonly": True,
+                    "range": [0, 10],
+                }],{"rescan": False})
+        else:
+            res = w.importdescriptors([{
+                    "desc": desc1_checksummed,
+                    "internal": False,
+                    "timestamp": "now",
+                    "watchonly": True,
+                    "active": True,
+                    "range": [0, 10],
+                },{
+                    "desc": desc2_checksummed,
+                    "internal": True,
+                    "timestamp": "now",
+                    "watchonly": True,
+                    "active": True,
+                    "range": [0, 10],
+                }])
         self.assertTrue(all([k["success"] for k in res]))
         wdefault.sendtoaddress(addr1, 0.1)
         rpc.mine()
