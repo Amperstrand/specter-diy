@@ -67,7 +67,7 @@ def compress_pubkey(pubkey_bytes: bytes) -> bytes:
         prefix = b'\x03' if y_last % 2 else b'\x02'
         return prefix + x
     
-    raise ValueError(f"Invalid pubkey length: {len(pubkey_bytes)}, expected 33 or 65")
+    raise ValueError("Invalid pubkey length: " + str(len(pubkey_bytes)) + ", expected 33 or 65")
 
 
 def derive_fingerprint(pubkey_bytes: bytes) -> bytes:
@@ -188,7 +188,7 @@ def handle_pin_iso_exception(e, pin_attempts_max=5):
             return (
                 attempts_left,
                 True,
-                PinError(f"Invalid PIN!\n{attempts_left} attempts left...")
+                PinError("Invalid PIN!\n" + str(attempts_left) + " attempts left...")
             )
         return (None, True, PinError("Invalid PIN!"))
     
