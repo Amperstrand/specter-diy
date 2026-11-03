@@ -1,0 +1,3 @@
+[SeedKeeper] Applet initialized
+[BootTrace][SeedKeeper] connect failed: SmartcardException smart card connection failed
+[BootTrace][SeedKeeper] connect failed: SmartcardException protocol not supported
