@@ -310,7 +310,7 @@ class CardDetectionTest(TestCase):
             self.assertIsInstance(SeedKeeperApplet.AID, bytes)
             self.assertEqual(len(SeedKeeperApplet.AID), 10)
             self.assertIsInstance(SatochipApplet.AID, bytes)
-            self.assertEqual(len(SatochipApplet.AID), 8)
+            self.assertEqual(SatochipApplet.AID, b"SatoChip\x00")
 
             class MockConnection:
                 pass

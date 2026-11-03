@@ -3,6 +3,7 @@ Satochip applet for Satochip hardware wallet communication.
 Inherits from SecureAppletBase for secure channel functionality.
 """
 from .secure_applet_base import SecureAppletBase
+from .satochip_securechannel import SatochipSecureChannel
 from .applet import ISOException, AppletException
 from binascii import hexlify
 
@@ -14,7 +15,7 @@ class SatochipApplet(SecureAppletBase):
     """
 
     # Satochip AID (Application Identifier) - ASCII "SatoChip"
-    AID = bytes([0x53, 0x61, 0x74, 0x6F, 0x43, 0x68, 0x69, 0x70])
+    AID = b"SatoChip\x00"  # instance AID 5361746F4368697000 (NOT the package AID)
     NAME = "Satochip"
 
     # CLA byte for Satochip commands
@@ -29,9 +30,21 @@ class SatochipApplet(SecureAppletBase):
     INS_FACTORY_RESET = 0xFD  # applet v0.16+: single APDU, P1=0xAA P2=0x55, secure channel, no PIN
 
     def __init__(self, connection):
-        """Initialize with card connection."""
         super().__init__(connection, self.AID)
-        print("[Satochip] Applet initialized")
+        self._sato_sc = SatochipSecureChannel()
+
+    def init_secure_channel(self):
+        if not self._sato_sc.is_initialized:
+            self._sato_sc.initiate(self.conn, cla=self.CLA)
+
+    def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
+        self.init_secure_channel()
+        wrapped = self._sato_sc.encrypt_apdu(inner_apdu, cla=self.CLA)
+        data = bytes(self.conn.transmit(wrapped))
+        resp, sw = data[:-2], data[-2:]
+        if sw != b"\x90\x00":
+            raise ISOException(hexlify(sw).decode())
+        return self._sato_sc.decrypt_response(resp)
 
     def factory_reset(self):
         """Reset the card to factory defaults (INS 0xFD, applet v0.16+).
@@ -41,17 +54,16 @@ class SatochipApplet(SecureAppletBase):
         0.16; older applets reject the P1/P2 combination.
         """
         apdu = bytes([self.CLA, self.INS_FACTORY_RESET, 0xAA, 0x55])
-        print("[Satochip] TX (encrypted): FACTORY_RESET")
         self.secure_request(apdu)
-        print("[Satochip] Factory reset complete")
 
     def get_card_status(self):
         """Get card status without secure channel (INS 0x3C)."""
         apdu = bytes([self.CLA, self.INS_GET_STATUS, 0x00, 0x00])
-        data = self.conn.transmit(apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
-        print("[Satochip] GET_STATUS response:", len(resp_data), "bytes")
-        return resp_data, sw1, sw2
+        data = bytes(self.conn.transmit(apdu))
+        resp_data, sw = data[:-2], data[-2:]
+        if sw != b"\x90\x00":
+            raise ISOException(hexlify(sw).decode())
+        return resp_data
 
     def parse_status(self, resp_data):
         """Parse GET_STATUS response into dict."""
@@ -73,7 +85,6 @@ class SatochipApplet(SecureAppletBase):
             status['setup_done'] = resp_data[10] != 0x00
         if len(resp_data) >= 12:
             status['needs_secure_channel'] = resp_data[11] != 0x00
-        print("[Satochip] Parsed status:", status)
         return status
 
     def verify_pin(self, pin):
@@ -82,19 +93,15 @@ class SatochipApplet(SecureAppletBase):
             pin = pin.encode()
 
         inner_apdu = bytes([self.CLA, self.INS_VERIFY_PIN, 0x00, 0x00, len(pin)]) + pin
-        print("[Satochip] TX (encrypted): VERIFY_PIN")
 
         self.secure_request(inner_apdu)
-        print("[Satochip] PIN verified successfully")
         return (True, None)
 
     def get_authentikey(self):
         """Get authentikey for fingerprint derivation (INS 0x73)."""
         apdu = bytes([self.CLA, self.INS_BIP32_GET_AUTHENTIKEY, 0x00, 0x00])
-        print("[Satochip] TX (encrypted): GET_AUTHENTIKEY")
 
         resp = self.secure_request(apdu)
-        print("[Satochip] Authentikey received:", len(resp), "bytes")
         return resp  # Returns raw pubkey bytes (65 bytes uncompressed)
 
     def get_extended_key(self, path):
@@ -124,10 +131,8 @@ class SatochipApplet(SecureAppletBase):
         p2 = 0x40
         
         apdu = bytes([self.CLA, self.INS_BIP32_GET_EXTENDED_KEY, depth, p2, len(path)]) + path
-        print("[Satochip] TX (encrypted): GET_EXTENDED_KEY depth=", depth)
         
         resp = self.secure_request(apdu)
-        print("[Satochip] Extended key response:", len(resp), "bytes")
         
         # Parse response: chaincode(32) | coordx_size(2) | coordx | ...
         if len(resp) < 66:
@@ -137,17 +142,15 @@ class SatochipApplet(SecureAppletBase):
         coordx_size = int.from_bytes(resp[32:34], 'big')
         
         if coordx_size != 32:
-            print("[Satochip] Warning: coordx_size=", coordx_size, "expected 32")
-        
+            raise AppletException(
+                "unexpected coordx_size %d (secp256k1 expects 32)" % coordx_size
+            )
         coordx = resp[34:34+coordx_size]
         
         # Construct compressed pubkey: 0x02 or 0x03 prefix + coordx
         # We default to 0x02 (even y) - if signature verification fails, try 0x03
         # For now, use 0x02 as default
         pubkey = b'\x02' + coordx
-        
-        print("[Satochip] Chaincode:", hexlify(chaincode))
-        print("[Satochip] Pubkey (compressed):", hexlify(pubkey))
         
         return (pubkey, chaincode)
     
@@ -176,10 +179,8 @@ class SatochipApplet(SecureAppletBase):
         # P2 = 0x00
         # No 2FA (chalresponse=None) for basic signing
         apdu = bytes([self.CLA, self.INS_SIGN_TRANSACTION_HASH, keynbr, 0x00, len(tx_hash)]) + tx_hash
-        print("[Satochip] TX (encrypted): SIGN_TRANSACTION_HASH")
         
         resp = self.secure_request(apdu)
-        print("[Satochip] Signature response:", len(resp), "bytes")
         
         # Response is DER-encoded signature
         return resp
@@ -239,8 +240,6 @@ class SatochipApplet(SecureAppletBase):
         
         # Construct extended key data
         xpub_data = version + bytes([depth]) + parent_fingerprint + child_number + chaincode + pubkey
-        
-        print("[Satochip] XPUB data (78 bytes):", hexlify(xpub_data))
         
         # Parse as HDKey using read_from with BytesIO
         from io import BytesIO
