@@ -12,6 +12,14 @@ from helpers import load_apps
 from app import BaseApp
 import display
 
+def _dbg(msg):
+    try:
+        import pyb
+        pyb.UART(3, 115200).write(("[MAIN] " + msg + "\r\n").encode())
+    except Exception:
+        pass
+
+
 def main(apps=None, network="main", keystore_cls=None):
     """
     apps: list of apps to load
@@ -74,6 +82,7 @@ def main(apps=None, network="main", keystore_cls=None):
 
     # make Specter instance
     settings_path = platform.fpath("/flash")
+    _dbg('creating Specter...')
     specter = Specter(
         gui=gui,
         keystores=keystores,
@@ -88,15 +97,18 @@ def main(apps=None, network="main", keystore_cls=None):
         import config
     except ImportError:
         import config_default as config
+    _dbg('hil_enabled=%s' % getattr(config, 'hil_enabled', False))
     if getattr(config, "hil_enabled", False):
         try:
             from test_mode import TestMode
+            _dbg('TestMode created')
             specter.test_mode = TestMode(specter)
         except Exception as e:
             print("[Main] Test mode not available:", e)
             specter.test_mode = None
     else:
         specter.test_mode = None
+    _dbg('starting specter...')
     specter.start()
 
 

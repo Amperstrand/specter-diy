@@ -43,6 +43,7 @@ class TestMode:
             try:
                 import pyb
                 self.uart = pyb.UART(3, 115200)
+                self.uart.init(115200, bits=8, parity=None, stop=1, read_buf_len=512)
             except Exception as e:
                 print("[TestMode] UART3 init failed:", e)
 
@@ -99,6 +100,10 @@ class TestMode:
         buffer = ""
         
         print("[TestMode] Ready for commands. Send TEST_STATUS to check.")
+        # UART3 heartbeat: proves the loop is alive even without commands
+        self._hb_count = 0
+        if self.uart is not None:
+            self.uart.write(b"[TestMode] ALIVE on UART3\r\n")
         
         while self.running:
             try:
@@ -125,7 +130,13 @@ class TestMode:
                 except Exception as e:
                     print("[TestMode] Poll error:", e)
                     await asyncio.sleep_ms(100)
-                
+
+                # heartbeat (100 iterations x ~50ms poll timeout = ~5s)
+                self._hb_count += 1
+                if self._hb_count >= 100 and self.uart is not None:
+                    self._hb_count = 0
+                    self.uart.write(b"[TestMode] HB\r\n")
+
                 # P6: card hotplug detection ~every second (20 x 50ms)
                 if not platform.simulator:
                     self._hotplug_counter += 1

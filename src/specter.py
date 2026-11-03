@@ -173,6 +173,16 @@ class Specter:
 
     async def setup(self):
         try:
+            # start TestMode before keystore selection so it's responsive
+            # even while the app waits for a card
+            if hasattr(self, 'test_mode') and self.test_mode is not None:
+                try:
+                    import asyncio
+                    asyncio.create_task(self.test_mode._command_loop())
+                    print("[Specter] Test mode started")
+                except Exception as e:
+                    print("[Specter] Failed to start test mode:", e)
+
             # check if the user already selected the keystore class
             if self.keystore is None:
                 await self.select_keystore()
