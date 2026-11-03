@@ -1,0 +1,49 @@
+[00:05:13] [SURVEY] === apdu survey start ===
+[ATR] n/a
+[P1] --- MemoryCard ---
+[MC.select.OK] 36543 us
+[MC.sc_open.ERR] 124 us: 'SecureChannel' object has no attribute 'open_channel'
+[00:05:15] [MC.get_random.OK] 603752 us
+[MC.get_pubkey.ERR] 155 us: 'MemoryCardApplet' object has no attribute 'get_pubkey'
+[MC.pin_status.ERR] 6700
+[MC.storage.0] OK
+[MC.storage.1] OK
+[MC.storage.220] OK
+[00:05:17] [MC.storage.221.ERR] 6984
+[MC.sc_close.ERR] 105 us: 'MemoryCardApplet' object has no attribute 'close_channel'
+[P2] --- Satochip v0.14 ---
+[SC.select.OK] 32612 us
+[SC.sc_init.OK] 481649 us
+[SC.get_status.OK] 30304 us
+[SC.status.raw] (b'\x00\x0e\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01', 144, 0)
+[SC.verify_pin.ERR] 117632 us: 63c2
+[SC.xpub.m.ERR] 9c04
+[SC.xpub.m/44h/0h/0h.ERR] 9c04
+[SC.xpub.m/84h/0h/0h.ERR] 9c04
+[SC.xpub.m/83696968h/0h/0h.ERR] 9c04
+[SC.xpub.m/83696968h/128h/0h.ERR] 9c04
+[SC.sign.ff.ERR] 9c04
+[SC.pin_change.ERR] 9c04
+[P3] --- SeedKeeper v0.2 ---
+[SK.select.OK] 48025 us
+[00:05:19] [SK.sc_init.OK] 486092 us
+[SK.get_status.ERR] 119213 us: 9c04
+[SK.status.raw] None
+[SK.verify_pin.OK] 112570 us
+[SK.label_get.ERR] 113161 us: 9c04
+[SK.label] None
+[SK.label_rt.ERR] 9c04
+[SK.list_headers.ERR] 112866 us: 9c04
+[SK.headers] None
+[SK.bip39.ERR] can't convert NoneType to int
+[SK.typed_secret] password-type roundtrip requires import INS - documented, not auto-executed
+[P4] --- cross-family SELECT switching ---
+[P4.switch.MC] 9000
+[P4.switch.SK] 9000
+[P4.switch.SC] 9000
+[P4.switch.MC] 9000
+[P4.switch.SC] 9000
+[P5] --- session lifecycle ---
+[P5.disconnect] OK
+[P5.reconnect.ERR] too many connections
+[SURVEY] === apdu survey complete ===
