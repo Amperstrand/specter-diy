@@ -19,11 +19,15 @@
   GATE: real-card e2e on device, automated HIL run green, screenshots captured,
   docs/J3R180.md complete. → Procedure: runbook **sessions A (J3R180 CAP install +
   smoke) and D (wallet e2e gate)**; HIL automation via `test/integration/hil_runner.py`.
-- **M2 — Satochip & SeedKeeper**: #42 (Satochip client verified vs applet v0.16-0.1
-  semantics: factory-reset PIN/PUK, Lc-less secure-channel) + #41 (SeedKeeper client incl.
-  #22 EEPROM-corruption handling). GATE: per-card e2e sign/store flows + HIL. →
-  Procedure: runbook **sessions B (Satochip e2e sign) and C (SeedKeeper e2e +
-  provisioning)**.
+- **M2 — one pytest suite, three card backends** (owner redefinition 2026-11-03, #45):
+  same stories, same assertions for ALL applet families (MemoryCard, Satochip v0.14,
+  SeedKeeper v0.2) across (1) F469 device seat (M1 path), (2) CardMan/OmniKey J3R180 via
+  pcscd — cardbench's 39/39 card tests (`.audit-lanes/cardbench-2026-11-02.md`) are the
+  seed to port/unify as backend #2, (3) unix simulator (vpcd-proxied real card or virtual
+  card). **GATE: all applet families x all backends green.** Folded into the P6
+  DeviceController architecture (sim/HIL backends already designed; pcscd backend joins
+  them; cardbench seed ports in). Do-not-start-until-M1-gate lands. Satochip/SeedKeeper
+  client PRs #41/#42 remain the client-side substrate.
 - **M3 — upstream**: lead with diybitcoinhardware/f469-disco#41 (half-duplex TE/RE echo
   fix — the load-bearing T=1 reliability change; corroborated by osmo-ccid-firmware + our
   ccid-firmware-rs); f469-disco#40 (T=1 timing) as follow-up RFC; specter-diy M1/M2 PRs on
