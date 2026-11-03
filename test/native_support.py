@@ -63,6 +63,26 @@ def setup_native_stubs():
         pyb.usb_mode = lambda *args, **kwargs: None
         pyb.UART = lambda *args, **kwargs: None
         pyb.USB_VCP = lambda *args, **kwargs: None
+        pyb.Pin = lambda *args, **kwargs: None
+        pyb.cpu = lambda *args, **kwargs: None
+
+    # uscard is a MicroPython C module built in the f469-disco usermods, not a repo file
+    uscard = _ensure_module("uscard")
+    if not hasattr(uscard, "Reader"):
+        class _StubReader:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def createConnection(self):
+                raise SmartcardException(
+                    "uscard stub: no smartcard hardware in native tests"
+                )
+
+        class SmartcardException(Exception):
+            pass
+
+        uscard.Reader = _StubReader
+        uscard.SmartcardException = SmartcardException
 
     lvgl = _ensure_module("lvgl")
     if not hasattr(lvgl, "SYMBOL"):
