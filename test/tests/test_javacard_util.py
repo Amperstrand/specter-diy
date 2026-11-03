@@ -301,19 +301,22 @@ class CardDetectionTest(TestCase):
     """Tests for card type detection (Phase 4)."""
     
     def test_aid_constants_exist(self):
-        """AIDs of the applets present in this module (Satochip: m2-satochip)."""
+"""AIDs of the applets present in this module (m1 + m2 union)."""
         try:
             from keystore.javacard.applets.memorycard import MemoryCardApplet
             from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+            from keystore.javacard.applets.satochip_applet import SatochipApplet
 
             self.assertIsInstance(SeedKeeperApplet.AID, bytes)
             self.assertEqual(len(SeedKeeperApplet.AID), 10)
+            self.assertIsInstance(SatochipApplet.AID, bytes)
+            self.assertEqual(len(SatochipApplet.AID), 8)
 
             class MockConnection:
                 pass
 
             self.assertEqual(
-                MemoryCardApplet(MockConnection()).aid, b"\xB0\x0B\x51\x11\xCB\x01"
+                MemoryCardApplet(MockConnection()).aid, b"°QË"
             )
         except ImportError as e:
             self.skipTest(f"Applet not available: {e}")
