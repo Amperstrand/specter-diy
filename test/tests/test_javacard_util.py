@@ -301,16 +301,20 @@ class CardDetectionTest(TestCase):
     """Tests for card type detection (Phase 4)."""
     
     def test_aid_constants_exist(self):
-        """MemoryCard applet selects its fixed AID (constructor contract)."""
+        """AIDs of the applets present in this module (Satochip: m2-satochip)."""
         try:
             from keystore.javacard.applets.memorycard import MemoryCardApplet
+            from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+
+            self.assertIsInstance(SeedKeeperApplet.AID, bytes)
+            self.assertEqual(len(SeedKeeperApplet.AID), 10)
 
             class MockConnection:
                 pass
 
-            applet = MemoryCardApplet(MockConnection())
-            self.assertEqual(applet.aid, b"\xB0\x0B\x51\x11\xCB\x01")
-            self.assertEqual(len(applet.aid), 6)
+            self.assertEqual(
+                MemoryCardApplet(MockConnection()).aid, b"\xB0\x0B\x51\x11\xCB\x01"
+            )
         except ImportError as e:
             self.skipTest(f"Applet not available: {e}")
 
