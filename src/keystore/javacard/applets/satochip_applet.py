@@ -44,17 +44,20 @@ class SatochipApplet(SecureAppletBase):
         resp, sw = data[:-2], data[-2:]
         if sw != b"\x90\x00":
             raise ISOException(hexlify(sw).decode())
+        if len(resp) == 0:
+            return b""  # v0.14 setup acknowledges with a bare 9000
         return self._sato_sc.decrypt_response(resp)
 
     def factory_reset(self):
-        """Reset the card to factory defaults (INS 0xFD, applet v0.16+).
-
-        Single APDU P1=0xAA P2=0x55 over the secure channel, PIN not
-        required. Wipes keys, seed, label and PIN. Requires applet protocol
-        0.16; older applets reject the P1/P2 combination.
-        """
-        apdu = bytes([self.CLA, self.INS_FACTORY_RESET, 0xAA, 0x55])
-        self.secure_request(apdu)
+        """Reset card to factory defaults. v0.16+ only (INS 0xFD absent in v0.14;
+        a single APDU P1=0xAA P2=0x55 over the secure channel, no PIN)."""
+        st = self.parse_status(self.get_card_status())
+        if (st["protocol_major_version"], st["protocol_minor_version"]) < (0x00, 0x10):
+            raise AppletException(
+                "factory_reset requires applet protocol >= 0.10 (v0.16); card runs 0.%02x"
+                % st["protocol_minor_version"]
+            )
+        self.secure_request(bytes([self.CLA, self.INS_FACTORY_RESET, 0xAA, 0x55]))
 
     def get_card_status(self):
         """Get card status without secure channel (INS 0x3C)."""

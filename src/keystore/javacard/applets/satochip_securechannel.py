@@ -181,34 +181,18 @@ class SatochipSecureChannel:
         return wrapped
 
     def decrypt_response(self, encrypted_response: bytes) -> bytes:
+        """v0.14 wire format: [IV(16) | ct_len(2) | ct] - no MAC on card responses.
+        The card PKCS7-pads plaintext before encrypting (applet source, response path)."""
         if not self.is_initialized:
             raise ValueError("Secure channel not initialized")
-
         if len(encrypted_response) < 18:
             raise ValueError("Encrypted response too short")
-
         card_iv = encrypted_response[:16]
-        data_size = int.from_bytes(encrypted_response[16:18], 'big')
-
-        if 18 + data_size + 2 > len(encrypted_response):
-            raise ValueError("Encrypted response truncated: expected %d data bytes, have %d" % (data_size, len(encrypted_response) - 18))
-
+        data_size = int.from_bytes(encrypted_response[16:18], "big")
+        if 18 + data_size > len(encrypted_response):
+            raise ValueError("Encrypted response truncated: expected %d data bytes, have %d"
+                             % (data_size, len(encrypted_response) - 18))
         ciphertext = encrypted_response[18:18 + data_size]
-
-        mac_len_offset = 18 + data_size
-        if mac_len_offset + 2 > len(encrypted_response):
-            raise ValueError("Encrypted response missing MAC length field")
-        mac_size = int.from_bytes(encrypted_response[mac_len_offset:mac_len_offset + 2], 'big')
-
-        if mac_len_offset + 2 + mac_size > len(encrypted_response):
-            raise ValueError("Encrypted response truncated: expected %d MAC bytes, have %d" % (mac_size, len(encrypted_response) - mac_len_offset - 2))
-        received_mac = encrypted_response[mac_len_offset + 2:mac_len_offset + 2 + mac_size]
-
-        mac_data = card_iv + encrypted_response[16:18] + ciphertext
-        expected_mac = hmac_sha1(self.mac_key, mac_data)
-        if received_mac != expected_mac:
-            raise ValueError("MAC verification failed on card response")
-
         cipher = aes(self.aes_key, 2, card_iv)
         plaintext = cipher.decrypt(ciphertext)
         return pkcs7_unpad(plaintext)
