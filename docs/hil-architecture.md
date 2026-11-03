@@ -969,3 +969,92 @@ python -c "import serial; s=serial.Serial('/dev/ttyACM0', 115200); ..."
 - Update file path reference in documentation
 - Create test_smartcard.py if Phase 4 of migration path is to be completed
 - Verify all file paths match implementation in Tasks 2-9
+
+---
+
+## 9. P6 revival (2026-11): structured events, framebuffer dumps, labgrid seat
+
+Owner directive 2026-11-03. Branch line: `feature/hil` (off the v1.10.5
+rebase base, cherry-pickable into m1/m2). Everything firmware-side is
+**flag-gated** (`hil_enabled` in `config_default.py`: simulator ON,
+production hardware OFF unless `config.py` overrides) so HIL code never
+reaches production firmware.
+
+### 9.1 Structured test results — JSON-lines (J:) events
+
+`TestMode` now emits one JSON object per line, `J:`-prefixed, on the UART3
+VCP alongside legacy `OK:`/`ERROR:` lines:
+
+    J:{"event": "result", "cmd": "TEST_STATUS", "ok": true, "reply": "OK:..."}
+    J:{"event": "card", "present": false}          # hotplug (see 9.3)
+    J:{"event": "fb", "seq": 0, "rgb565": "f800..."}  # framebuffer chunks (9.2)
+
+Host side: `test/integration/util/hil_events.py` (`HILEventStream`) — feed
+it raw lines, query `of_kind("result")` / `card_events()`; legacy lines pass
+through as `{"event": "legacy"}`. CI consumes the JUnit XML + these streams.
+
+### 9.2 Framebuffer dumps over VCP → PNG screenshots
+
+`TEST_FB_DUMP` reads the LTDC framebuffer (config: `fb_base_address`
+0xD0000000, 800x480 RGB565 — STM32F469-DISCO defaults) via `machine.mem16`,
+streams 512-pixel chunks as `fb` events. Host side reassembles with
+`FramebufferAssembler` + `rgb565_to_png()` (pure python PNG encoder —
+validated round-trip in `test/tests/test_hil_events.py`). Hardware-only
+(simulator answers `ERROR:No framebuffer in simulator`); first hardware
+validation of the default address/pitch is an owner runbook step.
+
+### 9.3 Card hotplug detection
+
+`TestMode._poll_card_hotplug()` polls the keystore connection's
+`isCardInserted()` ~1/s and emits `card` events on transitions — the host
+can wait for physical card swaps instead of guessing with sleeps.
+
+### 9.4 Issue #22 HIL flow — TEST_WIPE_SECRETS
+
+Single explicit wipe command (list headers → delete each → per-secret
+`wipe_error` events → `OK:WIPED_SECRETS:n/m`) instead of per-secret delete
+storms; `SeedKeeperApplet.delete_secret()` (INS 0xA5) added for it. Import
+storms remain a host-side anti-pattern: HIL test controllers must check
+`TEST_SECRETS` before importing (guard from issue #22 lives with the seed
+keeper test controller when it moves to this branch).
+
+### 9.5 Issue #23 — USB VCP drop during long sessions
+
+`UARTChannel.resilient_query()`: on write/read failure the port is
+reopened in a poll loop (the VCP re-enumerates under the same name) and the
+command retried (default 3). Long signing sessions use this instead of raw
+`query()`. Root cause on the device side (USB re-enumeration during
+signing) remains open under #23.
+
+### 9.6 Issue #31 — visible HIL indicator
+
+When `TestMode` activates it sets `Menu.HIL_ACTIVE = True`; every `Menu`
+title renders with a ` [TEST]` suffix. Always visible, zero-cost, matches
+the issue's preferred option 1.
+
+### 9.7 Labgrid seat — place `stm32-f469-diy`
+
+**Bench exclusivity rule:** the F469 runs EITHER ccid-firmware-rs (its
+CCID-reader role, in use by other workers) OR specter-diy firmware — never
+both. The labgrid place is the mutex, and the restore step is mandatory:
+
+    acquire place -> flash specter-diy HIL build -> run tests
+                  -> RE-FLASH ccid-firmware-rs -> release place
+
+- Place/exporter definition (ready to apply in `~/conwrt-bench`, the SSOT —
+  registration is an owner/coordinator action):
+  `test/integration/labgrid-place-stm32f469-diy.yaml`
+  (binds `ai-legion-nfc/stm32f469-stlink` SWD-flash + the same device's
+  VCP serial at 115200).
+- Runner: `test/integration/hil_runner.py` — encodes the restore in a
+  `finally:` with a distinct exit code 2 when the board could NOT be
+  restored (fail loud, never leave the bench in specter-diy state).
+- Card swaps stay manual (`--pause-for-card`); M1 gate = one seated card.
+  The F746 twin board is the future second seat for parallel M2 stories.
+
+### 9.8 CI — self-hosted nightly + label trigger
+
+`.github/workflows/hil.yml`: runs on a self-hosted runner labeled
+`hil-f469`; nightly cron + `workflow_dispatch` + `hil-run` PR label.
+Same self-hosted-runner pattern as bolty-rs #54 (cross-project reuse).
+Artifacts: JUnit XML + J: streams + PNG dumps.

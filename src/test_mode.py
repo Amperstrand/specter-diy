@@ -45,6 +45,22 @@ class TestMode:
                 self.uart = pyb.UART(3, 115200)
             except Exception as e:
                 print("[TestMode] UART3 init failed:", e)
+
+        # P6: structured JSON-lines events on the UART channel
+        self.jsonl = self.uart is not None
+        self._last_reply = None
+        self._current_cmd = None
+
+        # P6: card hotplug event detection (polled in _command_loop)
+        self._card_present = None
+        self._hotplug_counter = 0
+
+        # P6 (issue #31): visible HIL indicator - every Menu title gets a badge
+        try:
+            from gui.screens.menu import Menu
+            Menu.HIL_ACTIVE = True
+        except Exception as e:
+            print("[TestMode] HIL badge unavailable:", e)
         
     def find_javacard_keystore(self):
         """Find any JavaCard keystore instance from active Specter.
@@ -110,6 +126,13 @@ class TestMode:
                     print("[TestMode] Poll error:", e)
                     await asyncio.sleep_ms(100)
                 
+                # P6: card hotplug detection ~every second (20 x 50ms)
+                if not platform.simulator:
+                    self._hotplug_counter += 1
+                    if self._hotplug_counter >= 20:
+                        self._hotplug_counter = 0
+                        self._poll_card_hotplug()
+
                 # Poll UART3 VCP for HIL testing (hardware only)
                 if not platform.simulator and self.uart and self.uart.any():
                     try:
@@ -118,6 +141,7 @@ class TestMode:
                             cmd_str = line.decode().strip()
                             if cmd_str.startswith('TEST_'):
                                 self._current_source = 'uart'
+                                self._current_cmd = cmd_str
                                 await self._process_command(cmd_str)
                     except Exception as e:
                         print("[TestMode] UART error:", e)
@@ -170,10 +194,115 @@ class TestMode:
                 await self._cmd_get_address(addr_arg)
             elif cmd == "TEST_FULL_CHECK":
                 await self._cmd_full_check()
+            elif cmd == "TEST_FB_DUMP":
+                await self._cmd_fb_dump()
+            elif cmd == "TEST_WIPE_SECRETS":
+                await self._cmd_wipe_secrets()
             else:
                 self._respond("ERROR:Unknown command")
         except Exception as e:
             self._respond("ERROR:" + str(e))
+        finally:
+            self._emit_result_event()
+
+    def _event(self, kind, **fields):
+        """Emit a structured JSON-lines event on the UART channel.
+
+        Format: one line per event, 'J:' prefix + compact JSON object with an
+        "event" key. Host side parses these alongside legacy OK:/ERROR: lines.
+        """
+        if not self.jsonl or self.uart is None:
+            return
+        try:
+            import json
+            fields["event"] = kind
+            self.uart.write(("J:" + json.dumps(fields) + "\n").encode())
+        except Exception as e:
+            print("[TestMode] event emit failed:", e)
+
+    def _emit_result_event(self):
+        if self._current_cmd is None:
+            return
+        reply = self._last_reply or ""
+        self._event(
+            "result",
+            cmd=self._current_cmd,
+            ok=reply.startswith("OK"),
+            reply=reply,
+        )
+
+    def _poll_card_hotplug(self):
+        """Emit card insertion/removal events on connection state changes."""
+        ks = None
+        try:
+            ks = self.find_javacard_keystore()
+        except Exception:
+            ks = None
+        conn = getattr(ks, "connection", None) if ks is not None else None
+        if conn is None:
+            return
+        try:
+            present = bool(conn.isCardInserted())
+        except Exception:
+            return
+        if self._card_present is not None and present != self._card_present:
+            self._event("card", present=present)
+        self._card_present = present
+
+    async def _cmd_fb_dump(self):
+        """Dump the display framebuffer as chunked RGB565 hex events.
+
+        Emits OK:FB:width:height:chunks first, then one 'fb' JSON event per
+        chunk (512 pixels = 1024 hex chars each). Host reassembles to PNG.
+        Hardware only - the simulator has no LTDC framebuffer.
+        """
+        if platform.simulator:
+            self._respond("ERROR:No framebuffer in simulator")
+            return
+        try:
+            import config
+        except ImportError:
+            import config_default as config
+        from machine import mem16
+        base = getattr(config, "fb_base_address", 0xD0000000)
+        w = getattr(config, "fb_width", 800)
+        h = getattr(config, "fb_height", 480)
+        total = w * h
+        chunk = 512
+        chunks = (total + chunk - 1) // chunk
+        self._respond("OK:FB:%d:%d:%d" % (w, h, chunks))
+        for off in range(0, total, chunk):
+            n = chunk if off + chunk <= total else total - off
+            row = []
+            for i in range(n):
+                row.append("%04x" % mem16(base + (off + i) * 2))
+            self._event("fb", seq=off // chunk, rgb565="".join(row))
+
+    async def _cmd_wipe_secrets(self):
+        """Delete all card secrets (issue #22 HIL flow).
+
+        Single explicit wipe command instead of per-secret deletes - avoids
+        the EEPROM churn that corrupts the SeedKeeper object manager.
+        """
+        ks = self.find_javacard_keystore()
+        applet = getattr(ks, "applet", None) if ks is not None else None
+        if applet is None:
+            self._respond("ERROR:No javacard keystore/applet")
+            return
+        headers_fn = getattr(applet, "list_secret_headers", None)
+        delete_fn = getattr(applet, "delete_secret", None)
+        if headers_fn is None or delete_fn is None:
+            self._respond("ERR:NOT_SUPPORTED")
+            return
+        headers = headers_fn()
+        deleted = 0
+        for hdr in headers:
+            try:
+                delete_fn(hdr["id"])
+                deleted += 1
+            except Exception as e:
+                self._event("wipe_error", id=hdr["id"], error=str(e))
+        self._respond("OK:WIPED_SECRETS:%d/%d" % (deleted, len(headers)))
     
     def _respond(self, msg, source=None):
         """Send response to the appropriate transport.
@@ -183,6 +312,7 @@ class TestMode:
             source: 'stdin' or 'uart' - if None, uses _current_source
         """
         actual_source = source if source is not None else self._current_source
+        self._last_reply = msg.split('\n', 1)[0]
         
         if actual_source == 'uart' and self.uart is not None:
             # Route to UART3 VCP
