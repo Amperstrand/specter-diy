@@ -21,6 +21,7 @@ class SeedKeeperApplet(SecureAppletBase):
     INS_EXPORT_SECRET = 0xA2
     INS_LIST_SECRETS = 0xA6
     INS_GET_STATUS = 0xA7
+    INS_DELETE_SECRET = 0xA5
 
     # =============================================================================
     # SeedKeeper Secret Types
@@ -311,6 +312,20 @@ class SeedKeeperApplet(SecureAppletBase):
         result = b''.join(chunks)
         print("[SeedKeeper] Exported secret total length:", len(result))
         return result
+
+    def delete_secret(self, sid):
+        """Delete a secret by ID (INS 0xA5, PIN protected).
+
+        Single-secret delete; for wiping everything prefer the HIL
+        TEST_WIPE_SECRETS flow that pairs list+delete with error events
+        (issue #22 - per-secret delete storms corrupt the EEPROM object
+        manager on SeedKeeper cards).
+        """
+        sid_bytes = bytes([(sid >> 8) & 0xFF, sid & 0xFF])
+        apdu = bytes([self.CLA, self.INS_DELETE_SECRET, 0x00, 0x00, 0x02]) + sid_bytes
+        print("[SeedKeeper] TX (encrypted): DELETE_SECRET", sid)
+        self.secure_request(apdu)
+        print("[SeedKeeper] Secret deleted:", sid)
 
     def get_card_status(self):
         """Get card status without secure channel (INS 0x3C). Byte 11 = needs_secure_channel flag."""

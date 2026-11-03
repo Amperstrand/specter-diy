@@ -136,6 +136,40 @@ class UARTChannel:
         self.send(command)
         return self.readline(timeout=timeout)
 
+    def _reopen(self, attempts: int = 10, delay: float = 1.0) -> bool:
+        """Reopen after a USB VCP drop (issue #23).
+
+        The device re-enumerates on disconnect, so the port can vanish
+        mid-session and reappear under the same name; poll for it.
+        """
+        self.close()
+        for _ in range(attempts):
+            try:
+                self.open()
+                return True
+            except Exception:
+                time.sleep(delay)
+        return False
+
+    def resilient_query(self, command: str, timeout: float = 5, retries: int = 3) -> bytes:
+        """query() that survives USB VCP disconnects (issue #23).
+
+        On write/read failure the port is reopened and the command
+        retried; used for long signing sessions where the VCP is known
+        to drop.
+        """
+        last_err: Exception = SerialException("resilient_query: no attempt made")
+        for _ in range(retries):
+            try:
+                if self._serial is None or not getattr(self._serial, 'is_open', False):
+                    if not self._reopen():
+                        raise SerialException("port did not reappear: %s" % self._port)
+                return self.query(command, timeout=timeout)
+            except (SerialException, OSError, FileNotFoundError) as e:
+                last_err = e
+                time.sleep(0.5)
+        raise last_err
+
     def drain(self) -> None:
         """
         Read and discard any buffered data.

@@ -5,10 +5,15 @@ from ..decorators import on_release, cb_with_args
 
 
 class Menu(Screen):
+    # Set to True by TestMode (issue #31): visible HIL-firmware indicator
+    HIL_ACTIVE = False
+
     def __init__(
         self, buttons=[], title="What do you want to do?", note=None, y0=60, last=None
     ):
         super().__init__()
+        if self.HIL_ACTIVE:
+            title = title + " [TEST]"
         print("[UITrace] Menu init: title=%r items=%d" % (title, len(buttons)))
         for value, text, *args in buttons:
             if text is None:

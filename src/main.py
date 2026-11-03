@@ -80,14 +80,22 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
-    # Start test mode for automated testing
+    # Start test mode for automated testing (P6 flag gate:
+    # simulator default on, hardware default off - config.py overrides)
     try:
-        from test_mode import TestMode
-        test_mode = TestMode(specter)  # Pass specter instance
-        # We'll start test mode after specter starts the event loop
-        specter.test_mode = test_mode
-    except Exception as e:
-        print("[Main] Test mode not available:", e)
+        import config
+    except ImportError:
+        import config_default as config
+    if getattr(config, "hil_enabled", False):
+        try:
+            from test_mode import TestMode
+            test_mode = TestMode(specter)  # Pass specter instance
+            # We will start test mode after specter starts the event loop
+            specter.test_mode = test_mode
+        except Exception as e:
+            print("[Main] Test mode not available:", e)
+            specter.test_mode = None
+    else:
         specter.test_mode = None
     specter.start()
 

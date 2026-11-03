@@ -1,0 +1,40 @@
+# labgrid bench definitions for the specter-diy HIL seat (P6).
+#
+# Apply in ~/conwrt-bench (the labgrid SSOT) - registration itself is an
+# owner/coordinator action; this file is the ready-to-apply definition.
+#
+# BENCH EXCLUSIVITY: the F469 runs EITHER ccid-firmware-rs (CCID-reader
+# role, other workers) OR specter-diy. hil_runner.py acquires this place
+# as the mutex and restores ccid-firmware-rs before release.
+
+# --- exporter side (ai-legion-nfc host, USB passthrough) ---
+exporter:
+  ai-legion-nfc:
+    resources:
+      STM32F469DISCO_STLINK:  # ST-Link V2-1: SWD flash + VCP (UART3 routed)
+        NetworkUSBStLink:
+          name: stm32f469-stlink
+          match:
+            usb_path: "1-3.2"   # adjust to the physical port on ai-legion-nfc
+      STM32F469DISCO_VCP:
+        NetworkSerialPort:
+          name: stm32f469-vcp
+          match:
+            usb_path: "1-3.2"   # same physical device: ST-Link VCP interface
+          speed: 115200
+
+# --- coordinator side (place) ---
+place:
+  stm32-f469-diy:
+    comment: "STM32F469-Discovery - specter-diy HIL seat (EXCLUSIVE with ccid-firmware-rs role)"
+    tags:
+      - stm32
+      - f469
+      - specter-diy
+      - hil
+    matched_resources:
+      - stm32f469-stlink   # ai-legion-nfc/stm32f469-stlink (flash)
+      - stm32f469-vcp      # VCP serial (test transport)
+    drivers:
+      - SerialDriver
+      - OpenOCDDriver
