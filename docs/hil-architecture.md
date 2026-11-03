@@ -1002,6 +1002,10 @@ streams 512-pixel chunks as `fb` events. Host side reassembles with
 validated round-trip in `test/tests/test_hil_events.py`). Hardware-only
 (simulator answers `ERROR:No framebuffer in simulator`); first hardware
 validation of the default address/pitch is an owner runbook step.
+Upstream parallel: diybitcoinhardware/f469-disco PR #39 adds an SDL
+screenshot function to the unix simulator — same goal on the sim side;
+if it lands, sim-side HIL screenshots can reuse it instead of a
+sim-specific path.
 
 ### 9.3 Card hotplug detection
 
