@@ -117,13 +117,45 @@ else:
     st = timed("SC.get_status", lambda: sc.get_card_status())
     log("SC.status.raw", str(st)[:200])
 
-    r = timed("SC.verify_pin", lambda: sc.verify_pin(PIN))
+    # factory default PIN (CardEdge v0.14 PIN_INIT_VALUE = "Muscle00") - fresh applet
+    r = timed("SC.verify_factory_pin", lambda: sc.verify_pin("Muscle00"))
+
+    # personalization: SETUP (INS 0x2A) with the format from pysatochip card_setup()
+    # data = [dflt_len][dflt_pin] | [tries0][ublk_tries0][pin0_len][pin0][ublk0_len][ublk0]
+    #       | [tries1][ublk_tries1][pin1_len][pin1][ublk1_len][ublk1] | memsize(2) memsize2(2) ACL(3)
+    dflt = b"Muscle00"
+    pin0 = b"1234"
+    ublk0 = b"12345678"
+    pin1 = b"1234"
+    ublk1 = b"12345678"
+    data = bytes([len(dflt)]) + dflt
+    data += bytes([5, 3, len(pin0)]) + pin0 + bytes([len(ublk0)]) + ublk0
+    data += bytes([5, 3, len(pin1)]) + pin1 + bytes([len(ublk1)]) + ublk1
+    data += (32).to_bytes(2, "big") + (0).to_bytes(2, "big") + bytes([1, 1, 1])
+    apdu_setup = bytes([0xB0, 0x2A, 0x00, 0x00, len(data)]) + data
+    r = timed("SC.setup_sc", lambda: sc.secure_request(apdu_setup))
+
+    r = timed("SC.verify_pin_new", lambda: sc.verify_pin("1234"))
+
+    # BIP32 seed import (INS 0x6C): bench seed from "abandon ... about" (64 bytes BIP39)
+    import hashlib
+    bench_seed = hashlib.pbkdf2_hmac("sha512", b"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", b"mnemonic", 2048)[:64]
+    apdu_seed = bytes([0xB0, 0x6C, len(bench_seed), 0x00, len(bench_seed)]) + bench_seed
+    r = timed("SC.seed_import", lambda: sc.secure_request(apdu_seed))
+    if r:
+        log("SC.seed_import.resp", str(bytes(r)[:80]))
+
+    r = timed("SC.authentikey", lambda: sc.get_authentikey())
+    if r:
+        from binascii import hexlify
+        log("SC.authentikey.raw", hexlify(bytes(r)).decode()[:80])
 
     # BIP32 derivations incl. BIP85 paths (host verifies offline)
     for path in ("m", "m/44h/0h/0h", "m/84h/0h/0h", "m/83696968h/0h/0h", "m/83696968h/128h/0h"):
         try:
             pub, cc = sc.get_extended_key(path if isinstance(path, bytes) else sc._path_to_bytes(path))
-            log("SC.xpub.%s" % path, "pub=%s cc=%s" % (bytes(pub).hex(), bytes(cc).hex()))
+            from binascii import hexlify
+            log("SC.xpub.%s" % path, "pub=%s cc=%s" % (hexlify(bytes(pub)).decode(), hexlify(bytes(cc)).decode()))
         except Exception as e:
             log("SC.xpub.%s.ERR" % path, str(e))
 
@@ -133,7 +165,8 @@ else:
     h = hashlib.sha256(msg).digest()
     try:
         sig = sc.sign_transaction_hash(0xFF, h)
-        log("SC.sign.ff", bytes(sig).hex()[:180])
+        from binascii import hexlify
+        log("SC.sign.ff", hexlify(bytes(sig)).decode()[:180])
     except Exception as e:
         log("SC.sign.ff.ERR", str(e))
 

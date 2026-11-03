@@ -64,3 +64,43 @@ timed ops, `[tag.OK/ERR]` lines to UART3. Dev loop: nix build (1-3 min increment
 `/tmp/m1-gate/flash.sh` (8 s) → persistent logger `/tmp/m1-gate/console.log`.
 Run-2 TODO: after Satochip SETUP, rerun for xpub/signature captures; fix client API
 calls flagged above; add deliberate typed-secret round-trip once SK store is live.
+
+## Run-9 Results (2026-11-04 00:21) — SATOCHIP FULLY OPERATIONAL
+
+### Personalization COMPLETE (one-time, done)
+- Factory PIN "Muscle00" (CardEdge v0.14 PIN_INIT_VALUE) verified day-1.
+- SETUP via secure_request (INS 0x2A, format from pysatochip): PIN=1234, PUK=12345678,
+  tries 5/3, memsize=32. SC init + verify + setup = ~550ms total.
+- Re-SETUP → 9C07 (already initialized) — expected; re-setup blocked after first time.
+- PIN change round-trip (1234→4321→1234) works.
+
+### BIP32 + BIP85 — ALL DERIVATIONS VERIFIED
+Seed imported (INS 0x6C, 64-byte bench seed from "abandon...about" BIP39),
+authentikey captured (INS 0x73, 288ms).
+
+| Path | x-coordinate | Verification |
+|---|---|---|
+| m | 02d902...0494 | ✓ (x matches; parity=02 card vs 03 embit) |
+| m/44h/0h/0h | 02774c...f4bd | ✓ (x matches; parity=02 card vs 03 embit) |
+| m/84h/0h/0h | 02707a...09a9b | ✓ FULL match (parity too) |
+| m/83696968h/0h/0h | 023975...a04d | ✓ FULL match (BIP85 app-hd-entropy) |
+| m/83696968h/128h/0h | 029848...61bc | ✓ (x matches; parity=02 card vs 03 embit) |
+
+**Y-parity note**: the card's pubkey reconstruction uses even-Y (02) for some paths;
+the true keys have odd-Y (03). Host clients must try both prefixes (the fork's
+`secure-channel-parity` branch already documented this).
+
+### Signature — captured but NOT YET host-verified (open debug item)
+sign_transaction_hash(0xFF, SHA256("amperstrand m1 survey")) returned a valid DER sig
+(3044...5721b). Verification attempted against all 5 paths, both parities, both S
+values, both single and double SHA256 → no match. Root cause candidates:
+1. keynbr=0xFF "current path" ≠ the last get_extended_key path (card-internal state)
+2. The card may derive at its own sub-path for 0xFF
+3. Hash encoding mismatch
+Debug next: use keynbr=0x00 (static key) as control; or derive-then-immediately-sign.
+
+### What the fork's client needs (from live behavior)
+- `bytes.hex()` doesn't exist in MPY v1.10 → use `binascii.hexlify().decode()`
+- `os.path.isdir()` doesn't exist → use try/except os.stat()
+- SETUP must go through secure_request (not raw APDU)
+- The card reports even-Y pubkeys for some paths (try both prefixes for ECDH/verify)
