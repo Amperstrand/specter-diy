@@ -75,6 +75,21 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
+    # HIL test mode (flag gate: simulator default on, production hardware
+    # off - config.py overrides; see docs/hil-architecture.md section 9)
+    try:
+        import config
+    except ImportError:
+        import config_default as config
+    if getattr(config, "hil_enabled", False):
+        try:
+            from test_mode import TestMode
+            specter.test_mode = TestMode(specter)
+        except Exception as e:
+            print("[Main] Test mode not available:", e)
+            specter.test_mode = None
+    else:
+        specter.test_mode = None
     specter.start()
 
 
