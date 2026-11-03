@@ -67,15 +67,24 @@ while True:
             
             log("[STEP 4] Connecting T=1 protocol...")
             try:
-                conn.connect(conn.T1_protocol)
-                log("         OK - T=1 connected")
+                try:
+                    conn.connect(conn.T1_protocol)
+                    log("         OK - T=1 connected")
+                except Exception as ce:
+                    # driver-level session may already be open (state persists
+                    # across script retries) - reuse it and proceed
+                    if "already connected" in str(ce):
+                        log("         session already open - reusing")
+                    else:
+                        raise ce
                 leds[2].on()  # Red ON
                 
                 time.sleep_ms(300)
                 
                 log("[STEP 5] Selecting SeedKeeper applet...")
                 SEEDKEEPER_AID = bytes([0x53, 0x65, 0x65, 0x64, 0x4B, 0x65, 0x65, 0x70, 0x65, 0x72])
-                response, sw1, sw2 = conn.sendAPDU(0xB0, 0xA4, 0x04, 0x00, SEEDKEEPER_AID)
+                apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(SEEDKEEPER_AID)]) + SEEDKEEPER_AID
+                response, sw1, sw2 = conn.transmit(apdu)
                 status = (sw1 << 8) | sw2
                 
                 log("         SW1=" + hex(sw1) + " SW2=" + hex(sw2))

@@ -34,7 +34,11 @@ def main(apps=None, network="main", keystore_cls=None):
     # each hosts gets it's own RAM folder for data
     # m1-gate fallback: bench board's QSPI chip is dead (JEDEC 00 00 00),
     # no-QSPI builds have no /qspi mount -> use internal flash
-    storage_backend = "/qspi" if os.path.isdir("/qspi") else "/flash"
+    try:
+        os.stat("/qspi")
+        storage_backend = "/qspi"
+    except OSError:
+        storage_backend = "/flash"
     Host.SETTINGS_DIR = platform.fpath(storage_backend + "/hosts")
     Specter.SETTINGS_DIR = platform.fpath(storage_backend + "/global")
     hosts = [
