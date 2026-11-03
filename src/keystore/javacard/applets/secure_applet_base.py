@@ -88,9 +88,8 @@ class SecureAppletBase(Applet):
         encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
         
         # Transmit to card
-        data = self.conn.transmit(encrypted_apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
-        sw = bytes([sw1, sw2])
+        data = bytes(self.conn.transmit(encrypted_apdu))
+        resp_data, sw = data[:-2], data[-2:]
         
         # Handle 9c30 - Secure Channel Required (corrupted channel)
         if sw == b"\x9c\x30" and retry:
@@ -99,9 +98,8 @@ class SecureAppletBase(Applet):
             self.sc.initiate(self.conn)
             # Retry command once with fresh encryption
             encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
-            data = self.conn.transmit(encrypted_apdu)
-            resp_data, sw1, sw2 = data[0], data[1], data[2]
-            sw = bytes([sw1, sw2])
+            data = bytes(self.conn.transmit(encrypted_apdu))
+            resp_data, sw = data[:-2], data[-2:]
         
         # Card-state failures: no amount of retrying or channel re-init fixes
         # these (issue #22) - stop with an actionable error instead.

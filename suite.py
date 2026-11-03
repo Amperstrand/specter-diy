@@ -130,6 +130,9 @@ def raw_transmit(conn, hexstr):
 # ---------- identify first (pure read; no GP auth anywhere in this suite) ----------
 
 def identify(conn):
+    # CPLC only answers at ISD context; a warm connect after an applet session
+    # can leave another applet selected, so re-select the ISD first (pure read).
+    raw_transmit(conn, "00A4040008A000000151000000")
     cplc = raw_transmit(conn, "80CA9F7F00")
     body = cplc[3:]  # strip 9F 7F 2A (tag + length byte)
     # bench convention (ledger ccid-firmware-rs#127): serial = value[12:16], batch = value[16:18]
@@ -261,10 +264,42 @@ def story_satochip(conn):
 
 
 def story_seedkeeper(conn):
-    fci = raw_transmit(conn, "00A404000B536565644B65657065720000")
-    status = raw_transmit(conn, "B03C0000")
-    assert status == fci, "status/FCI divergence"
-    return "select+GET_STATUS raw=%s" % status.hex()
+    from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+    from keystore.javacard.applets.applet import ISOException as SKISO
+
+    mnemonic = ("abandon " * 11 + "about").encode()
+    seed64 = bytes.fromhex(
+        "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc1"
+        "9a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4")
+    app = SeedKeeperApplet(conn)
+    app.select()
+    app.init_secure_channel()
+    try:
+        headers = app.list_secret_headers()
+    except Exception as e:  # 9c04=fresh card, 9c06=pin needed - neither burns PIN tries
+        if "9c04" in str(e):
+            app.setup()
+            app.verify_pin("1234")
+            headers = []
+        elif "9c06" in str(e):
+            app.verify_pin("1234")
+            headers = []
+        else:
+            raise
+    have = {h.get("label") for h in (headers or [])}
+    if "cardbench-bip39" not in have:
+        app.import_secret(SeedKeeperApplet.SECRET_TYPE_BIP39_MNEMONIC,
+                          "cardbench-bip39", mnemonic)
+    if "cardbench-seed64" not in have:
+        app.import_secret(SeedKeeperApplet.SECRET_TYPE_MASTER_SEED,
+                          "cardbench-seed64", seed64)
+    by_label = {h["label"]: h for h in app.list_secret_headers()}
+    assert "cardbench-bip39" in by_label and "cardbench-seed64" in by_label, sorted(by_label)
+    assert bytes(app.export_secret(by_label["cardbench-bip39"]["id"])) == mnemonic
+    assert bytes(app.export_secret(by_label["cardbench-seed64"]["id"])) == seed64
+    st = app.get_seedkeeper_status()
+    assert st.get("nb_secrets", 0) >= 2, st
+    return "channel+pin+2-secrets store/list/export roundtrip (%d secrets)" % st["nb_secrets"]
 
 
 STORIES = [
