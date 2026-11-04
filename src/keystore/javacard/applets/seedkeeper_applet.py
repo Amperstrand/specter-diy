@@ -115,11 +115,14 @@ class SeedKeeperApplet(SecureAppletBase):
     SECRET_TYPE_MASTER_SEED = 0x10
     SECRET_TYPE_BIP39_MNEMONIC = 0x30
 
-    def setup(self, pin=b"1234", puk=b"12345678", old_pin=b"Muscle00"):
+    def setup(self, pin=b"1234", puk=None, old_pin=b"Muscle00"):
+        import os as _os
+        if puk is None:
+            puk = _os.urandom(16)
         """First-time personalization (MUSCLE-layout 0x2A over the secure channel)."""
-        d = bytes([len(old_pin)]) + old_pin + bytes([3, 3])
+        d = bytes([len(old_pin)]) + old_pin + bytes([5, 1])
         d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
-        d += bytes([3, 3])
+        d += bytes([5, 1])
         d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
         d += b"\x00\x00" + b"\x00\x00" + b"\x00\x00\x00" + b"\x00\x00"
         return self.secure_request(

@@ -78,8 +78,7 @@ class SecureAppletBase(Applet):
         
         Note:
             The secure channel uses INS 0x82 for all encrypted commands.
-            The 9c30 error indicates the secure channel state is corrupted
-            (e.g., due to card reset or IV mismatch), requiring re-initialization.
+            9C30 is a SeedKeeper object lock — channel re-init cannot release it.
         """
         if not self.sc.is_initialized:
             raise AppletException("Secure channel not initialized")
@@ -92,16 +91,6 @@ class SecureAppletBase(Applet):
         resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
         sw = bytes([sw1, sw2])
         
-        # Handle 9c30 - Secure Channel Required (corrupted channel)
-        if sw == b"\x9c\x30" and retry:
-            print("[" + str(self.NAME) + "] Secure channel corrupted (9c30), re-establishing...")
-            # Re-establish secure channel
-            self.sc.initiate(self.conn)
-            # Retry command once with fresh encryption
-            encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
-            data = bytes(self.conn.transmit(encrypted_apdu))
-            resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
-            sw = bytes([sw1, sw2])
         
         # Card-state failures: retrying or channel re-init cannot fix these.
         # SW remap per pysaudit conformance audit (fp#5/#6).
