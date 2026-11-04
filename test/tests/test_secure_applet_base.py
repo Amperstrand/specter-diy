@@ -102,35 +102,26 @@ class SecureAppletBaseTest(TestCase):
         except ImportError:
             self.skipTest("SecureAppletBase not yet implemented")
     
-    def test_secure_request_9c30_retries(self):
-        """Test secure_request() retries on 9c30 (secure channel corrupted)."""
+    def test_secure_request_9c30_lock_busy(self):
+        """9c30 = object-lock busy: typed CardStateError, NO channel re-init."""
         try:
             from keystore.javacard.applets.secure_applet_base import SecureAppletBase
-            
+            from keystore.javacard.applets.applet import CardStateError
+
             conn = MockConnection()
             applet = SecureAppletBase(conn, b'\x00\x01\x02\x03')
-            
-            # Mock secure channel
+
             applet.sc.is_initialized = True
             applet.sc.encrypt_apdu = MagicMock(return_value=b'encrypted')
-            applet.sc.decrypt_response = MagicMock(return_value=b'decrypted')
             applet.sc.initiate = MagicMock()
-            
-            # First call returns 9c30, second call succeeds
-            call_count = [0]
-            def mock_transmit(apdu):
-                call_count[0] += 1
-                if call_count[0] == 1:
-                    return (b'', 0x9c, 0x30)  # Secure channel corrupted
-                return (b'response', 0x90, 0x00)
-            
-            conn.transmit = mock_transmit
-            
-            result = applet.secure_request(b'inner_apdu')
-            
-            # Should have retried after re-init
-            self.assertEqual(call_count[0], 2)
-            applet.sc.initiate.assert_called_once_with(conn)
+
+            conn.transmit = MagicMock(return_value=(b'', 0x9c, 0x30))
+
+            with self.assertRaises(CardStateError) as ctx:
+                applet.secure_request(b'inner_apdu')
+
+            self.assertIn('lock', str(ctx.exception).lower())
+            applet.sc.initiate.assert_not_called()
         except ImportError:
             self.skipTest("SecureAppletBase not yet implemented")
     

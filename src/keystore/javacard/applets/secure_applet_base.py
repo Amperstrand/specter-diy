@@ -91,18 +91,11 @@ class SecureAppletBase(Applet):
         data = self.conn.transmit(encrypted_apdu)
         resp_data, sw1, sw2 = data[0], data[1], data[2]
         sw = bytes([sw1, sw2])
-        
-        # Handle 9c30 - Secure Channel Required (corrupted channel)
-        if sw == b"\x9c\x30" and retry:
-            print("[" + str(self.NAME) + "] Secure channel corrupted (9c30), re-establishing...")
-            # Re-establish secure channel
-            self.sc.initiate(self.conn)
-            # Retry command once with fresh encryption
-            encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
-            data = self.conn.transmit(encrypted_apdu)
-            resp_data, sw1, sw2 = data[0], data[1], data[2]
-            sw = bytes([sw1, sw2])
-        
+
+        # 9c30 old re-init handler REMOVED (gatekeeper blocker #2):
+        # 9C30 is a SeedKeeper object lock — channel re-init cannot release it.
+        # The correct lock-busy handler is below in the SW remap section.
+
         # Card-state failures: retrying or channel re-init cannot fix these.
         # SW remap per pysaudit conformance audit (fp#5/#6).
         if sw == b"\x9c\x06":
