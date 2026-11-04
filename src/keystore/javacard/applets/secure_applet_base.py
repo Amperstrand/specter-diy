@@ -58,6 +58,12 @@ class SecureAppletBase(Applet):
         self.sc.initiate(self.conn)
         print("[" + str(self.NAME) + "] Secure channel established")
     
+    def _parse_transmit(self, data):
+        """Polymorphic transmit-result parser (tuple or bytes contract)."""
+        if isinstance(data[0], bytes):
+            return data[0], data[1], data[2]  # tuple: (resp, sw1, sw2)
+        return data[:-2], data[-2], data[-1]  # bytes: resp with SW appended
+
     def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
         """
         Send APDU via secure channel (INS 0x82).
@@ -89,7 +95,7 @@ class SecureAppletBase(Applet):
         
         # Transmit to card
         data = self.conn.transmit(encrypted_apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
+        resp_data, sw1, sw2 = self._parse_transmit(data)
         sw = bytes([sw1, sw2])
 
         # 9c30 old re-init handler REMOVED (gatekeeper blocker #2):
@@ -131,7 +137,7 @@ class SecureAppletBase(Applet):
                 self.sc.initiate(self.conn)
                 encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
                 data = self.conn.transmit(encrypted_apdu)
-                resp_data, sw1, sw2 = data[0], data[1], data[2]
+                resp_data, sw1, sw2 = self._parse_transmit(data)
                 sw = bytes([sw1, sw2])
             else:
                 raise ISOException(hexlify(sw).decode())
