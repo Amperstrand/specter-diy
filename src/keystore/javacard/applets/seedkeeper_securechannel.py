@@ -183,9 +183,12 @@ class SeedKeeperSecureChannel:
         
         # 2. Send INIT_SC APDU (INS 0x81)
         apdu = bytes([cla, 0x81, 0x00, 0x00, 0x41]) + pub_bytes
-        data = bytes(connection.transmit(apdu))
-        resp_data = data[:-2]  # bytes object
-        sw1, sw2 = data[-2], data[-1]
+        data = connection.transmit(apdu)
+        # polymorphic: tuple (resp, sw1, sw2) or bytes (resp with SW appended)
+        if isinstance(data[0], bytes):
+            resp_data, sw1, sw2 = data[0], data[1], data[2]
+        else:
+            resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
         if sw1 != 0x90 or sw2 != 0x00:
             raise ValueError('INIT_SC failed: SW={:02X}{:02X}'.format(sw1, sw2))
         coordx_size = (resp_data[0] << 8) | resp_data[1]
