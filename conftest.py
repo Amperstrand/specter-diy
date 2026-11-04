@@ -5,6 +5,7 @@ _ROOT = os.path.dirname(__file__)
 for _subdir in (
     'src',
     'f469-disco/libs/common',
+    'f469-disco/libs/common/embit/src',
     'f469-disco/libs/unix',
     'f469-disco/usermods/udisplay_f469/display_unixport',
     'test',
