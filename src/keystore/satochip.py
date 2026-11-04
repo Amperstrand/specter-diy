@@ -152,60 +152,45 @@ class Satochip(JavaCardKeyStore):
         print('[BootTrace][Satochip] PIN verified successfully')
 
         # Get authentikey and derive fingerprint + idkey.
-        # Fail fast if this identity step fails; downstream wallet storage relies on idkey.
         self.show_loader('Reading card info...')
         self.fingerprint = None
         self.idkey = None
         try:
-            authentikey_bytes = self.applet.get_authentikey()
+            # fp#3 fix: applet client now returns 33B compressed pubkey
+            # (recovered from self-signature, not the raw 106B response)
+            authentikey = self.applet.get_authentikey()
         except Exception as e:
             print('[BootTrace][Satochip] get_authentikey failed:', e)
             raise KeyStoreError("Failed to read card authentikey. Please reconnect card and try again.")
 
-        if not authentikey_bytes:
-            print('[BootTrace][Satochip] Empty authentikey response')
-            raise KeyStoreError("Satochip returned empty authentikey")
-
-        # Compress pubkey for fingerprint/idkey derivation
-        if len(authentikey_bytes) == 65:
-            x = authentikey_bytes[1:33]
-            y_last = authentikey_bytes[64]
-            prefix = b'\x03' if y_last % 2 else b'\x02'
-            compressed = prefix + x
-            key_format = "uncompressed"
-        elif len(authentikey_bytes) > 65:
-            # Some applet responses include extra bytes around the uncompressed key.
-            # Keep compatibility with observed 106-byte responses.
-            x = authentikey_bytes[1:33]
-            y_last = authentikey_bytes[64]
-            prefix = b'\x03' if y_last % 2 else b'\x02'
-            compressed = prefix + x
-            key_format = "extended"
-        elif len(authentikey_bytes) == 33:
-            compressed = authentikey_bytes
-            key_format = "compressed"
-        else:
-            print('[BootTrace][Satochip] Unexpected authentikey length:', len(authentikey_bytes))
+        if not authentikey or len(authentikey) != 33:
+            print('[BootTrace][Satochip] Bad authentikey:', len(authentikey) if authentikey else 0)
             raise KeyStoreError("Unexpected authentikey format from Satochip")
 
-        print('[BootTrace][Satochip] Authentikey format:', key_format)
-
-        # Use shared utility function for fingerprint derivation
         from .javacard.util import derive_fingerprint
-        
+
+        # fp#1 fix: fingerprint from the RECOVERED 33B pubkey (not raw response)
         try:
-            self.fingerprint = derive_fingerprint(authentikey_bytes)
+            self.fingerprint = derive_fingerprint(authentikey)
         except Exception as e:
             print('[BootTrace][Satochip] Fingerprint derivation failed:', e)
             raise KeyStoreError("Failed to derive card fingerprint")
-        
-        print('[BootTrace][Satochip] Fingerprint set:', hexlify(self.fingerprint).decode())
 
-        # Derive idkey from authentikey for wallet file encryption
-        # This ensures the same Satochip card always gets the same idkey
+        print('[BootTrace][Satochip] Device fingerprint:', hexlify(self.fingerprint).decode())
+
+        # fp#2 fix: wallet master fingerprint from xpub at path m
+        # (authentikey is random at install, never matches PSBT master fp)
+        try:
+            master_pub, _cc = self.applet.get_extended_key(b"")
+            self.master_fingerprint = derive_fingerprint(master_pub)
+            print('[BootTrace][Satochip] Master fingerprint:', hexlify(self.master_fingerprint).decode())
+        except Exception as e:
+            print('[BootTrace][Satochip] Master fingerprint derivation failed:', e)
+            self.master_fingerprint = None
+
         try:
             from helpers import tagged_hash
-            self.idkey = tagged_hash("satochip idkey", compressed)
+            self.idkey = tagged_hash("satochip idkey", authentikey)
         except Exception as e:
             print('[BootTrace][Satochip] idkey derivation failed:', e)
             raise KeyStoreError("Failed to derive wallet encryption key from card identity")
@@ -376,8 +361,8 @@ class Satochip(JavaCardKeyStore):
         Since self.root is None, we derive ownership from xpub
         fetched from the card using get_xpub().
         """
-        # Check fingerprint first
-        if key.fingerprint is not None and key.fingerprint != self.fingerprint:
+        # fp#2: PSBT fp = hash160(master_pubkey), not authentikey (random at install)
+        if key.fingerprint is not None and key.fingerprint != self.master_fingerprint:
             return False
         
         # Get the xpub at the derivation path from the card
@@ -494,8 +479,8 @@ class Satochip(JavaCardKeyStore):
         print('[Satochip] sign_psbt called')
         sig_count = 0
         
-        # Get our fingerprint
-        my_fp = self.fingerprint
+        # fp#2: use master_fingerprint for PSBT matching
+        my_fp = self.master_fingerprint or self.fingerprint
         if my_fp is None:
             print('[Satochip] No fingerprint set, cannot sign')
             return 0
