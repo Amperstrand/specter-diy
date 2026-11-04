@@ -434,16 +434,16 @@ class SeedKeeperApplet(SecureAppletBase):
             print("[SeedKeeper] Successfully converted to mnemonic")
             return mnemonic
         else:
-            # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
-            print("[SeedKeeper] Parsing BIP39 format...")
-            if len(secret_data) >= 2:
-                entropy_len = (secret_data[0] << 8) | secret_data[1]
-                entropy = secret_data[2:2 + entropy_len]
-                print("[SeedKeeper] Entropy length:", entropy_len)
-
-                # Convert to mnemonic
-                mnemonic = bip39.mnemonic_from_bytes(entropy)
-                print("[SeedKeeper] Successfully converted to mnemonic")
+            # sk#1 fix (default search path): [mnemonic_size(1)|mnemonic_utf8|passphrase_size(1)|passphrase]
+            print("[SeedKeeper] Parsing BIP39 format (v0.2 layout)...")
+            if len(secret_data) >= 1:
+                mnemonic_len = secret_data[0]
+                mnemonic_bytes = bytes(secret_data[1:1 + mnemonic_len])
+                try:
+                    mnemonic = mnemonic_bytes.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    raise AppletException("BIP39 mnemonic is not valid UTF-8")
+                print("[SeedKeeper] Mnemonic length:", mnemonic_len)
                 return mnemonic
 
         raise AppletException("Invalid BIP39 secret format")
