@@ -88,8 +88,8 @@ class SecureAppletBase(Applet):
         encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
         
         # Transmit to card
-        data = self.conn.transmit(encrypted_apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
+        data = bytes(self.conn.transmit(encrypted_apdu))
+        resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
         sw = bytes([sw1, sw2])
 
         # 9c30 old re-init handler REMOVED (gatekeeper blocker #2):
