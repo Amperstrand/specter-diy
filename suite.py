@@ -307,20 +307,26 @@ def story_seedkeeper(conn):
             headers = []
         else:
             raise
-    have = {h.get("label") for h in (headers or [])}
-    if "cardbench-bip39" not in have:
-        app.import_secret(SeedKeeperApplet.SECRET_TYPE_BIP39_MNEMONIC,
-                          "cardbench-bip39", mnemonic)
-    if "cardbench-seed64" not in have:
-        app.import_secret(SeedKeeperApplet.SECRET_TYPE_MASTER_SEED,
-                          "cardbench-seed64", seed64)
+    headers = app.list_secret_headers()  # re-list: the 9c06 path returned [] pre-verify
+    labels = ("cardbench-bip39", "cardbench-seed64")
+    for h in headers:  # self-clean prior runs' secrets (storage-neutral)
+        if h.get("label") in labels:
+            app.delete_secret(h["id"])
+    baseline = sum(1 for h in headers if h.get("label") not in labels)
+    app.import_secret(SeedKeeperApplet.SECRET_TYPE_BIP39_MNEMONIC,
+                      "cardbench-bip39", mnemonic)
+    app.import_secret(SeedKeeperApplet.SECRET_TYPE_MASTER_SEED,
+                      "cardbench-seed64", seed64)
     by_label = {h["label"]: h for h in app.list_secret_headers()}
     assert "cardbench-bip39" in by_label and "cardbench-seed64" in by_label, sorted(by_label)
     assert bytes(app.export_secret(by_label["cardbench-bip39"]["id"])) == mnemonic
     assert bytes(app.export_secret(by_label["cardbench-seed64"]["id"])) == seed64
+    for h in app.list_secret_headers():  # remove exactly what this run stored
+        if h.get("label") in labels:
+            app.delete_secret(h["id"])
     st = app.get_seedkeeper_status()
-    assert st.get("nb_secrets", 0) >= 2, st
-    return "channel+pin+2-secrets store/list/export roundtrip (%d secrets)" % st["nb_secrets"]
+    assert st.get("nb_secrets", -1) == baseline, (st, baseline)
+    return "channel+pin+store/list/export/delete roundtrip (storage-neutral, %d resident)" % st["nb_secrets"]
 
 
 STORIES = [

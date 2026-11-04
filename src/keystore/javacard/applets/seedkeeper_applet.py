@@ -111,6 +111,7 @@ class SeedKeeperApplet(SecureAppletBase):
 
     INS_SETUP = 0x2A
     INS_IMPORT_SECRET = 0xA1
+    INS_RESET_SECRET = 0xA5
     SECRET_EXPORT_ALLOWED = 0x01
     SECRET_TYPE_MASTER_SEED = 0x10
     SECRET_TYPE_BIP39_MNEMONIC = 0x30
@@ -169,6 +170,14 @@ class SeedKeeperApplet(SecureAppletBase):
         self.secure_request(inner_apdu)
         print("[SeedKeeper] PIN verified successfully")
         return (True, None)
+
+    def delete_secret(self, secret_id):
+        """Zeroize+remove a secret by id. INS 0xA5, data=[id(2b BE)];
+        requires a previously validated PIN; SW 9c51 if id unknown."""
+        d = int(secret_id).to_bytes(2, "big")
+        print("[SeedKeeper] TX (encrypted): RESET_SECRET id=%d" % secret_id)
+        self.secure_request(
+            bytes([self.CLA, self.INS_RESET_SECRET, 0x00, 0x00, len(d)]) + d)
 
     def get_card_label(self):
         """Read card-level label via INS 0x3D, p2=0x01."""
