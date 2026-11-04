@@ -90,16 +90,8 @@ class SecureAppletBase(Applet):
         data = bytes(self.conn.transmit(encrypted_apdu))
         resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
         sw = bytes([sw1, sw2])
-<<<<<<< HEAD
-
-        # 9c30 old re-init handler REMOVED (gatekeeper blocker #2):
-        # 9C30 is a SeedKeeper object lock — channel re-init cannot release it.
-        # The correct lock-busy handler is below in the SW remap section.
-
-=======
         
         
->>>>>>> cardbench/m2-seedkeeper-store-side
         # Card-state failures: retrying or channel re-init cannot fix these.
         # SW remap per pysaudit conformance audit (fp#5/#6).
         if sw == b"\x9c\x06":
