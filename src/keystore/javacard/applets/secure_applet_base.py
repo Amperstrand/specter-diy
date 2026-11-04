@@ -103,20 +103,45 @@ class SecureAppletBase(Applet):
             resp_data, sw1, sw2 = data[0], data[1], data[2]
             sw = bytes([sw1, sw2])
         
-        # Card-state failures: no amount of retrying or channel re-init fixes
-        # these (issue #22) - stop with an actionable error instead.
+        # Card-state failures: retrying or channel re-init cannot fix these.
+        # SW remap per pysaudit conformance audit (fp#5/#6).
         if sw == b"\x9c\x06":
+            # fp#5: 9C06 = PIN required (session expired), NOT corrupted EEPROM.
+            # Correct action: re-verify PIN, not physical reinsertion.
             raise CardStateError(
-                "9c06: operation not authorized - PIN re-verification will not help."
-                " If this persists after PIN verification the card EEPROM state may"
-                " be corrupted (issue #22): physically remove and reinsert the card."
+                "9c06: PIN verification required - the card session may have"
+                " expired. Re-enter your PIN and try again."
             )
         if sw == b"\x9c\x01":
             raise CardStateError(
-                "9c01: no memory left - card EEPROM is full. Delete secrets;"
-                " if delete also fails, physically remove and reinsert the card"
-                " (issue #22)."
+                "9c01: no memory left - card EEPROM is full. Delete secrets"
+                " or reset the card to factory defaults."
             )
+        if sw == b"\x9c\x0c":
+            # 9C0C = PIN blocked. PUK-recoverable (INS 0x46), NOT a wipe signal.
+            raise CardStateError(
+                "9c0c: PIN blocked. Use your PUK code to unblock the card."
+                " The card is NOT wiped - it can be recovered with the PUK."
+            )
+        if sw == b"\x9c\x30":
+            # fp#6: 9C30 = SeedKeeper object-lock busy, NOT a channel error.
+            # Channel re-init cannot release an object lock; retry the same op.
+            raise CardStateError(
+                "9c30: card operation lock busy - the previous operation may"
+                " still be completing. Retry the same operation."
+            )
+        if sw == b"\x9c\x20" or sw == b"\x9c\x21" or sw == b"\x9c\x22" or sw == b"\x9c\x23":
+            # Channel errors: one bounded re-init + retry is the correct action.
+            if retry:
+                print("[" + str(self.NAME) + "] Channel error ("
+                      + hexlify(sw).decode() + "), re-establishing...")
+                self.sc.initiate(self.conn)
+                encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
+                data = self.conn.transmit(encrypted_apdu)
+                resp_data, sw1, sw2 = data[0], data[1], data[2]
+                sw = bytes([sw1, sw2])
+            else:
+                raise ISOException(hexlify(sw).decode())
 
         # Check final status word
         if sw != b"\x90\x00":
