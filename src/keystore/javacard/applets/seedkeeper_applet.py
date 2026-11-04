@@ -109,6 +109,51 @@ class SeedKeeperApplet(SecureAppletBase):
             return status
         return {}
 
+    INS_SETUP = 0x2A
+    INS_IMPORT_SECRET = 0xA1
+    SECRET_EXPORT_ALLOWED = 0x01
+    SECRET_TYPE_MASTER_SEED = 0x10
+    SECRET_TYPE_BIP39_MNEMONIC = 0x30
+
+    def setup(self, pin=b"1234", puk=None, old_pin=b"Muscle00"):
+        import os as _os
+        if puk is None:
+            puk = _os.urandom(16)
+        """First-time personalization (MUSCLE-layout 0x2A over the secure channel)."""
+        d = bytes([len(old_pin)]) + old_pin + bytes([5, 1])
+        d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
+        d += bytes([5, 1])
+        d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
+        d += b"\x00\x00" + b"\x00\x00" + b"\x00\x00\x00" + b"\x00\x00"
+        return self.secure_request(
+            bytes([self.CLA, self.INS_SETUP, 0x00, 0x00, len(d)]) + d)
+
+    def import_secret(self, secret_type, label, payload, subtype=0):
+        """Store a secret via chunked 0xA1 INIT/PROCESS/FINALIZE (plain transport)."""
+        if isinstance(label, str):
+            label = label.encode()
+        header = bytes([secret_type, self.SECRET_EXPORT_ALLOWED, 0x01])
+        header += b"\x00\x00\x00" + b"\x00\x00\x00\x00"  # nb counters + fingerprint
+        header += bytes([subtype, 0x00, len(label)])
+        # v0.2: INIT reserves storage for the ECB-encrypted secret INCLUDING the
+        # FINALIZE pad block -> full PKCS7 length (a block-aligned payload still
+        # gains one trailing pad block)
+        padded = (len(payload) // 16 + 1) * 16
+        init_data = header + label + padded.to_bytes(2, "big")
+        self.secure_request(bytes([self.CLA, self.INS_IMPORT_SECRET,
+                                   self.SECRET_EXPORT_ALLOWED, 0x01,
+                                   len(init_data)]) + init_data)
+        off = 0
+        while off < len(payload):
+            chunk = payload[off:off + 180]
+            body = len(chunk).to_bytes(2, "big") + chunk
+            self.secure_request(bytes([self.CLA, self.INS_IMPORT_SECRET,
+                                       self.SECRET_EXPORT_ALLOWED, 0x02,
+                                       len(body)]) + body)
+            off += len(chunk)
+        return self.secure_request(bytes([self.CLA, self.INS_IMPORT_SECRET,
+                                          self.SECRET_EXPORT_ALLOWED, 0x03, 0x00]))
+
     def verify_pin(self, pin):
         """
         Verify PIN to unlock the card.
