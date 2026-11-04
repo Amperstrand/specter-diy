@@ -19,35 +19,50 @@ MAC_SIZE = 20
 AES_CBC = 2
 
 def recover_pubkey_from_sig(coordx, sig_der):
-    """Recover the full compressed pubkey from an x-only coord + self-signature."""
+    """Recover the full compressed pubkey from an x-only coord + self-signature.
+
+    Returns None if recovery fails (caller should try both parities).
+    """
     import hashlib
     msg = (len(coordx)).to_bytes(2, 'big') + bytes(coordx)
     h = hashlib.sha256(msg).digest()
-    sig = secp256k1.ecdsa_signature_parse_der(bytes(sig_der))
-    for prefix in (b'\x02', b'\x03'):
-        pub = secp256k1.ec_pubkey_parse(prefix + bytes(coordx))
-        if secp256k1.ecdsa_verify(sig, h, pub):
-            return prefix + bytes(coordx)
-    raise ValueError("pubkey recovery failed: signature invalid for both parities")
+    try:
+        sig = secp256k1.ecdsa_signature_parse_der(bytes(sig_der))
+        for prefix in (b'\x02', b'\x03'):
+            pub_parsed = secp256k1.ec_pubkey_parse(prefix + bytes(coordx))
+            pub_ser = secp256k1.ec_pubkey_serialize(pub_parsed, secp256k1.EC_UNCOMPRESSED)
+            pub64 = pub_ser[1:]
+            if secp256k1.ecdsa_verify(sig, h, pub64):
+                return prefix + bytes(coordx)
+    except Exception:
+        pass
+    return None
 
 
 def parse_xpub_response(resp):
-    """Parse a coordx+sig response, recovering the full pubkey.
+    """Parse a coordx response, recovering the full pubkey when a sig is present.
 
-    Format: [coordx_size(2) | coordx(N) | sig_size(2) | sig(N)]
-    Returns: (compressed_pubkey_33B, remaining_bytes_after_sig)
+    v0.14 INS 0x6D responses have NO self-signature — fallback to even-Y.
+    Format WITH sig: [coordx_size(2) | coordx(N) | sig_size(2) | sig(N)]
+    Format WITHOUT sig: [coordx_size(2) | coordx(N)]
+    Returns: (compressed_pubkey_33B, remaining_bytes)
     """
     if len(resp) < 4:
-        raise ValueError("response too short for coordx+sig")
+        raise ValueError("response too short for coordx")
     coordx_size = (resp[0] << 8) | resp[1]
-    if len(resp) < 2 + coordx_size + 2:
-        raise ValueError("response truncated before signature")
+    if len(resp) < 2 + coordx_size:
+        raise ValueError("response truncated before coordx")
     coordx = bytes(resp[2:2 + coordx_size])
     sig_off = 2 + coordx_size
-    sig_size = (resp[sig_off] << 8) | resp[sig_off + 1]
-    sig = bytes(resp[sig_off + 2:sig_off + 2 + sig_size])
-    pub = recover_pubkey_from_sig(coordx, sig)
-    return pub, resp[sig_off + 2 + sig_size:]
+    if len(resp) >= sig_off + 2:
+        sig_size = (resp[sig_off] << 8) | resp[sig_off + 1]
+        if sig_size > 0 and len(resp) >= sig_off + 2 + sig_size:
+            sig = bytes(resp[sig_off + 2:sig_off + 2 + sig_size])
+            pub = recover_pubkey_from_sig(coordx, sig)
+            if pub is not None:
+                return pub, resp[sig_off + 2 + sig_size:]
+    # fallback: no sig (v0.14 0x6D) or recovery failed — use even-Y
+    return b'\x02' + coordx, resp[sig_off:] if len(resp) > sig_off else b''
 
 
 
@@ -175,9 +190,17 @@ class SeedKeeperSecureChannel:
             raise ValueError('INIT_SC failed: SW={:02X}{:02X}'.format(sw1, sw2))
         coordx_size = (resp_data[0] << 8) | resp_data[1]
         coordx = bytes(resp_data[2:2+coordx_size])
-        
-        # 4. Reconstruct card's compressed pubkey (assume even Y = 0x02 prefix)
-        card_pubkey_compressed = bytes([0x02]) + coordx
+
+        # fp#3: try signature recovery for correct Y parity
+        sig_size_off = 2 + coordx_size
+        recovered = None
+        if len(resp_data) >= sig_size_off + 2:
+            sig_size = (resp_data[sig_size_off] << 8) | resp_data[sig_size_off + 1]
+            if sig_size > 0:
+                sig = bytes(resp_data[sig_size_off + 2:sig_size_off + 2 + sig_size])
+                recovered = recover_pubkey_from_sig(coordx, sig)
+
+        card_pubkey_compressed = recovered or (b'\x02' + coordx)
         card_pubkey = secp256k1.ec_pubkey_parse(card_pubkey_compressed)
         
         # 5. Compute ECDH shared secret: tweak_mul(card_pubkey, our_secret)
