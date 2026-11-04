@@ -216,7 +216,7 @@ class SecureAppletBaseTest(TestCase):
 
 
     def test_secure_request_9c06_raises_card_state_error(self):
-        """9c06 after PIN-verified session = corrupted EEPROM state (#22): typed error, NO channel re-init."""
+        """9c06 = PIN required (fp#5): correct remedy is re-verify PIN, not card reinsertion."""
         from keystore.javacard.applets.secure_applet_base import SecureAppletBase
         from keystore.javacard.applets.applet import CardStateError
 
@@ -233,7 +233,7 @@ class SecureAppletBaseTest(TestCase):
 
         msg = str(ctx.exception).lower()
         self.assertIn('9c06', msg)
-        self.assertIn('physical', msg)
+        self.assertIn('pin', msg)
         # must NOT auto-retry or re-establish the channel
         applet.sc.initiate.assert_not_called()
         self.assertEqual(conn.transmit.call_count, 1)
