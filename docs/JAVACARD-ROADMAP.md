@@ -5,43 +5,41 @@
 > pointers to the artifacts that implement each track. Maintained by worker `javacard`
 > (status table updated as milestones progress).
 
-## Status snapshot (2026-11-03)
-| Milestone | State | Evidence |
-|---|---|---|
-| M0 foundations | ✅ mostly done | master = upstream mirror bec1ab10 (PR #38 superseded/closed, archive `javacard-experiments`); T=1 primitive PR #39; MemoryCard PR #40; SeedKeeper client PR #41; Satochip client PR #42; PR#4 (specter-javacard J3H145 fix) rebased; Toporin CAPs = release downloads (no builds); card bench seat 1 (OmniKey+J3R180) proven w/ ATR; seat 2 (F469) in re-diagnosis (owner asserts connected; labgrid exporter fix authorized) |
-| M1 J3R180 + specter applet | 🔨 in flight | gate: card in shield → wallet e2e on J3R180 → HIL green + framebuffer screenshots. **Runbook sessions A + D** ([HARDWARE-RUNBOOK.md](../HARDWARE-RUNBOOK.md), PR #44) are the M1 gate procedure; card-side ops guide [specter-javacard docs/J3R180.md](https://github.com/Amperstrand/specter-javacard/blob/docs-j3r180/docs/J3R180.md) (PR#5) |
-| M2 Satochip v0.16 / SeedKeeper v2 | 🔨 staged | CAPs downloaded; clients in PRs #41/#42; personalization flows being proven on seat 1. **Runbook sessions B + C** are the M2 gate procedures; v0.16 conformance notes [docs/satochip-v016.md](../docs/satochip-v016.md) |
-| M3 upstream sells | 📋 planned | see below — **T=1 story leads with upstream f469-disco #41** (half-duplex TE/RE echo race), #40 timing as follow-up RFC (writeup corrected in PR #39 docs) |
-| HIL track | 🔨 planned (P6) | **PR #43** (`feature/hil`): flag-gated TestMode events, framebuffer PNG dumps, hotplug, TEST_WIPE_SECRETS, #23 resilient VCP, #31 badge; runner + labgrid place template + CI below |
+## Roadmap: branches and goals (2026-11-04, coordinator #45 latest)
 
-## Milestones & gates
-- **M1 — J3R180 + MemoryCard**: #39 (T=1, carries f469-disco pin) + #40 (slim keystore).
-  GATE: real-card e2e on device, automated HIL run green, screenshots captured,
-  docs/J3R180.md complete. → Procedure: runbook **sessions A (J3R180 CAP install +
-  smoke) and D (wallet e2e gate)**; HIL automation via `test/integration/hil_runner.py`.
-- **M2 — one pytest suite, three card backends** (owner redefinition 2026-11-03, #45):
-  same stories, same assertions for ALL applet families (MemoryCard, Satochip v0.14,
-  SeedKeeper v0.2) across (1) F469 device seat (M1 path), (2) CardMan/OmniKey J3R180 via
-  pcscd — cardbench's 39/39 card tests (`.audit-lanes/cardbench-2026-11-02.md`) are the
-  seed to port/unify as backend #2, (3) unix simulator (vpcd-proxied real card or virtual
-  card). **GATE: all applet families x all backends green.** Folded into the P6
-  DeviceController architecture (sim/HIL backends already designed; pcscd backend joins
-  them; cardbench seed ports in). Do-not-start-until-M1-gate lands. Satochip/SeedKeeper
-  client PRs #41/#42 remain the client-side substrate.
-- **M3 — upstream**: lead with diybitcoinhardware/f469-disco#41 (half-duplex TE/RE echo
-  fix — the load-bearing T=1 reliability change; corroborated by osmo-ccid-firmware + our
-  ccid-firmware-rs); f469-disco#40 (T=1 timing) as follow-up RFC; specter-diy M1/M2 PRs on
-  top of rebase #38; refresh our open upstream HIL PR cryptoadvance/specter-diy#347 (March)
-  with P6 improvements instead of a new PR; specter-javacard PR#4 upstream (upstream repo
-  dead since 2023 — may need maintainer ping or fork-as-home decision).
-- **Isolated**: feature/cap-installer (in-firmware CAP/GP installer) stays OUT of M1–M3
-  (upstream-resistance isolation).
-- **M3-prep stretch goal — DRY keystore refactor** (owner: *"possibly, not a given"*):
-  converge the near-duplicate keystore classes (MemoryCard/SeedKeeper/Satochip share
-  unlock/PIN/connection flows). Reference: the archived refactoring plan
-  `docs/JAVACARD_REFACTORING_PLAN.md` on `javacard-experiments` (phases 1–3 were executed
-  there; the clean-topology JavaCardKeyStore base on the m-branches is its living core).
-  Only pursue if an upstream sell would otherwise be blocked by the duplication.
+Framing: every deliverable is a **small, independently reviewable branch** — each one enables a specific feature set, carries its own tests, and stands on a pure-upstream base (mirror master = cryptoadvance v1.10.5+).
+
+### Board layer — Amperstrand/f469-disco (submodule, pinned by m1-t1-usart)
+| Branch/PR | Enables | Status |
+|---|---|---|
+| f469-disco #41 (half-duplex TE/RE) | Reliable T=1 card communication (fixes echo races) | proven on hardware (8-variant matrix + device) |
+| f469-disco #40 (T=1 timing) | ISO 7816-3-compliant timing | proven |
+| cardbench/unix-pyscard-backend | Simulator talking to real cards via any PCSC reader | green (suite 6/6) |
+
+### specter-diy branches (base: mirror master)
+| Branch | Enables | Status |
+|---|---|---|
+| `m1-t1-usart` (1 commit) | T=1 cards working with specter-diy | ✅ proven on device |
+| `m1-specter-applet` (+1 commit) | Javacard-seed keystore (MemoryCard) on J3R180 — slim client + base class + tests + docs | ✅ **M1 CLOSED** (device e2e) |
+| `m2-satochip` | Satochip cards as keystore (v0.14-0.2: select/auth/sign) | 🔨 conformance fixes in progress, hardware-verified per fix |
+| `m2-seedkeeper` | SeedKeeper secret storage (v0.2-0.1: store/retrieve/export) | 🔨 same |
+| `feature/hil` | Automated on-device testing: TestMode console, JSON events, framebuffer screenshots | ✅ working (produced the M1 evidence) |
+| `feature/no-qspi-safemode` | Booting on boards with dead/missing external QSPI flash | paused, documented |
+| `feature/cap-installer` | Installing/uninstalling CAP files from within the firmware | not started (kept separate) |
+
+### Test & demo tiers
+| Piece | Enables | Status |
+|---|---|---|
+| Unified suite (pytest, story-id→test-id) | Same tests across device / CardMan / simulator | 🔨 porting onto m2 clients |
+| Reference vectors (pysatochip-derived) | Regression-proof client fixes | 🔨 packaging |
+| Amperstrand/specter-playground (fork of k9ert's) | Scenario demos: `make simulate SCRIPT=memorycard-unlock` etc. + automated screenshot capture | fork ready; scenarios after M2 green |
+| conwrt-bench #119 | Labgrid-native flashing + CI runner → nightly matrix | queued |
+
+### Immediate goals (ordered)
+1. Land the four client conformance fixes with hardware verification → m2 branches green.
+2. Unified suite green across device + CardMan + simulator for all three applet families.
+3. Playground scenarios + GIF evidence for each user story.
+4. Refresh f469-disco #41 and prepare specter-diy minimal-branch PRs (each branch = one reviewable feature).
 
 ## Testing roadmap (layers, each milestone gates through all applicable)
 1. Simulator unit (run_sim.py + simulator.jar, CI-gated per PR)
