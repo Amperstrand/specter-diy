@@ -172,7 +172,16 @@ else:
         log("SC.sign.key00.ERR", str(e))
     try:
         # derive m/84h/0h/0h THEN sign with 0xFF (current path = 84h)
-        pub84, cc84 = sc.get_extended_key(sc._path_to_bytes("m/84h/0h/0h"))
+        # P2=0x00 = full private-key derivation (P2=0x40 stores watch-only → breaks signing)
+        path_bytes = sc._path_to_bytes("m/84h/0h/0h")
+        depth = len(path_bytes) // 4
+        apdu84 = bytes([0xB0, 0x6D, depth, 0x00, len(path_bytes)]) + path_bytes
+        resp84 = sc.secure_request(apdu84)
+        if resp84 and len(resp84) >= 66:
+            cc84 = bytes(resp84[:32])
+            coordx_size = (resp84[32] << 8) | resp84[33]
+            pub84 = bytes([0x02]) + bytes(resp84[34:34+coordx_size])
+            log("SC.fix84.pub", hexlify(pub84).decode())
         sig84 = sc.sign_transaction_hash(0xFF, h)
         log("SC.sign.84ff.sig", hexlify(bytes(sig84)).decode()[:180])
         log("SC.sign.84ff.pub", hexlify(bytes(pub84)).decode())

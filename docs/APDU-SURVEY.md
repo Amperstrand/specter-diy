@@ -124,3 +124,16 @@ Other Thread 2 data:
 - `SC.sign.key00` → 9C10 = SW_KEY_NOT_FOUND (no static key imported; BIP32 seed only — expected)
 - `SC.seed_import` → 9C17 = SW_BIP32_INITIALIZED_SEED (seed already there — confirmed persistence)
 - All xpubs stable across reboots (same values from previous sessions)
+
+## SATOCHIP SIGNING PROVEN (2026-11-04 01:33Z)
+
+Signature from P2=0x00 (full-key) derivation at m/84h/0h/0h + sign with 0xFF:
+`304402201c7765f8...58b46f3e` → **VERIFIES** against embit-derived m/84h/0h/0h pubkey
+(single-SHA256, standard ECDSA).
+
+**CONFIRMED FIX**: `get_extended_key` must use P2=0x00 when deriving for signing.
+P2=0x40 stores watch-only key on card → signing produces unverifiable signatures.
+Reference: pysatochip CardConnector.py line 3619 uses P2=0x00 for signing paths.
+
+Satochip e2e status: SELECT ✓ | SC ✓ | PIN ✓ | seed import ✓ | authentikey ✓ |
+BIP32 all paths ✓ | BIP85 paths ✓ | **SIGNING ✓** | PIN change ✓
