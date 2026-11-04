@@ -209,6 +209,10 @@ class TestMode:
                 await self._cmd_fb_dump()
             elif cmd == "TEST_WIPE_SECRETS":
                 await self._cmd_wipe_secrets()
+            elif cmd == "TEST_REBOOT":
+                self._respond("OK:REBOOTING")
+                import pyb
+                pyb.hard_reset()
             else:
                 self._respond("ERROR:Unknown command")
         except Exception as e:
