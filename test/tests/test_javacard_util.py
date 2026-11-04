@@ -218,34 +218,36 @@ class PinExceptionHandlingTest(TestCase):
     """Tests for handle_pin_iso_exception() utility function."""
     
     def test_bricked_card_9c0c(self):
-        """Test 9C0C status word raises CriticalError."""
+        """9C0C = PIN blocked, PUK-recoverable — NOT a wipe signal."""
         try:
             from keystore.javacard.util import handle_pin_iso_exception
             from keystore.javacard.applets.applet import ISOException
-            from platform import CriticalErrorWipeImmediately
-            
+            from keystore.core import PinError
+
             e = ISOException("9c0c")
             attempts, should_raise, exc = handle_pin_iso_exception(e)
-            
+
             self.assertEqual(attempts, 0)
             self.assertTrue(should_raise)
-            self.assertIsInstance(exc, type(CriticalErrorWipeImmediately("")))
+            self.assertIsInstance(exc, PinError)  # PUK-recoverable
+            self.assertIn("PUK", str(exc))
         except ImportError:
             self.skipTest("handle_pin_iso_exception not yet implemented")
-    
+
     def test_bricked_card_6983(self):
-        """Test 6983 status word raises CriticalError."""
+        """6983 = PIN blocked (ISO), PUK-recoverable — NOT a wipe signal."""
         try:
             from keystore.javacard.util import handle_pin_iso_exception
             from keystore.javacard.applets.applet import ISOException
-            from platform import CriticalErrorWipeImmediately
-            
+            from keystore.core import PinError
+
             e = ISOException("6983")
             attempts, should_raise, exc = handle_pin_iso_exception(e)
-            
+
             self.assertEqual(attempts, 0)
             self.assertTrue(should_raise)
-            self.assertIsInstance(exc, type(CriticalErrorWipeImmediately("")))
+            self.assertIsInstance(exc, PinError)  # PUK-recoverable
+            self.assertIn("PUK", str(exc))
         except ImportError:
             self.skipTest("handle_pin_iso_exception not yet implemented")
     
