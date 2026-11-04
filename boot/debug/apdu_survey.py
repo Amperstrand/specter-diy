@@ -225,6 +225,26 @@ else:
     except Exception as e:
         log("SK.label_rt.ERR", str(e))
 
+    # SeedKeeper needs its own SETUP (INS 0x2A) to set setupDone=true
+    # Format: [dflt_len][dflt_pin] [tries0][ublk_tries0][pin0_len][pin0] [ublk0_len][ublk0]
+    #         [tries1][ublk_tries1][pin1_len][pin1] [ublk1_len][ublk1] [RFU(2)][RFU(2)][RFU(3)]
+    try:
+        dflt = b"1234"  # default pin (not checked in SK setup — just skipped)
+        pin0 = b"1234"
+        ublk0 = b"12345678"
+        pin1 = b"0000"  # deprecated, ignored
+        ublk1 = b"00000000"  # deprecated, ignored
+        sk_data = bytes([len(dflt)]) + dflt
+        sk_data += bytes([5, 3, len(pin0)]) + pin0 + bytes([len(ublk0)]) + ublk0
+        sk_data += bytes([5, 3, len(pin1)]) + pin1 + bytes([len(ublk1)]) + ublk1
+        sk_data += (0).to_bytes(2, "big") + (0).to_bytes(2, "big") + bytes([0, 0, 0])
+        apdu_sk_setup = bytes([0xB0, 0x2A, 0x00, 0x00, len(sk_data)]) + sk_data
+        r = timed("SK.setup_sc", lambda: sk.secure_request(apdu_sk_setup))
+        # re-verify PIN after setup (PIN may have been reset)
+        r = timed("SK.verify_pin_post", lambda: sk.verify_pin(PIN))
+    except Exception as e:
+        log("SK.setup.ERR", str(e))
+
     hdrs = timed("SK.list_headers", lambda: sk.list_secret_headers())
     log("SK.headers", str(hdrs)[:400])
 

@@ -137,3 +137,19 @@ Reference: pysatochip CardConnector.py line 3619 uses P2=0x00 for signing paths.
 
 Satochip e2e status: SELECT ✓ | SC ✓ | PIN ✓ | seed import ✓ | authentikey ✓ |
 BIP32 all paths ✓ | BIP85 paths ✓ | **SIGNING ✓** | PIN change ✓
+
+## SEEDKEEPER 9C04 RESOLVED (2026-11-04 01:37Z)
+
+Root cause: SeedKeeper applet requires its own SETUP (INS 0x2A) to set `setupDone=true`.
+Without it, ALL commands except VERIFY_PIN and PKI ops return 9C04 (SW_SETUP_NOT_DONE).
+
+Fix: SETUP via secure channel with format:
+`[dflt_len][dflt_pin] [tries0][ublk_tries0][pin0_len][pin0] [ublk0_len][ublk0] [deprecated_ignored] [RFU...]`
+
+After SETUP:
+- `list_secret_headers` → OK (returns empty list — fresh card, no secrets yet)
+- `verify_pin` → OK
+- Store operations unblocked
+
+**SeedKeeper e2e status: SELECT ✓ | SC ✓ | PIN ✓ | SETUP ✓ | list_headers ✓**
+Next: import a secret → export → full round-trip evidence.
