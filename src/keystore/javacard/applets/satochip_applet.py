@@ -14,7 +14,7 @@ class SatochipApplet(SecureAppletBase):
     """
 
     # Satochip AID (Application Identifier) - ASCII "SatoChip"
-    AID = bytes([0x53, 0x61, 0x74, 0x6F, 0x43, 0x68, 0x69, 0x70])
+    AID = bytes([0x53, 0x61, 0x74, 0x6F, 0x43, 0x68, 0x69, 0x70, 0x00])
     NAME = "Satochip"
 
     # CLA byte for Satochip commands
@@ -51,7 +51,7 @@ class SatochipApplet(SecureAppletBase):
         data = self.conn.transmit(apdu)
         resp_data, sw1, sw2 = data[0], data[1], data[2]
         print("[Satochip] GET_STATUS response:", len(resp_data), "bytes")
-        return resp_data, sw1, sw2
+        return resp_data
 
     def parse_status(self, resp_data):
         """Parse GET_STATUS response into dict."""
