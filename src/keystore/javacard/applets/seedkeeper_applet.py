@@ -115,11 +115,22 @@ class SeedKeeperApplet(SecureAppletBase):
     SECRET_TYPE_MASTER_SEED = 0x10
     SECRET_TYPE_BIP39_MNEMONIC = 0x30
 
+<<<<<<< HEAD
     def setup(self, pin=b"1234", puk=b"12345678", old_pin=b"Muscle00"):
         """First-time personalization (MUSCLE-layout 0x2A over the secure channel)."""
         d = bytes([len(old_pin)]) + old_pin + bytes([3, 3])
         d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
         d += bytes([3, 3])
+=======
+    def setup(self, pin=b"1234", puk=None, old_pin=b"Muscle00"):
+        import os as _os
+        if puk is None:
+            puk = _os.urandom(16)
+        """First-time personalization (MUSCLE-layout 0x2A over the secure channel)."""
+        d = bytes([len(old_pin)]) + old_pin + bytes([5, 1])
+        d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
+        d += bytes([5, 1])
+>>>>>>> cardbench/m2-seedkeeper-store-side
         d += bytes([len(pin)]) + pin + bytes([len(puk)]) + puk
         d += b"\x00\x00" + b"\x00\x00" + b"\x00\x00\x00" + b"\x00\x00"
         return self.secure_request(
@@ -476,16 +487,16 @@ class SeedKeeperApplet(SecureAppletBase):
             print("[SeedKeeper] Successfully converted to mnemonic")
             return mnemonic
         else:
-            # BIP39 secret format: entropy_len(2) || entropy || [passphrase_len(2) || passphrase]
-            print("[SeedKeeper] Parsing BIP39 format...")
-            if len(secret_data) >= 2:
-                entropy_len = (secret_data[0] << 8) | secret_data[1]
-                entropy = secret_data[2:2 + entropy_len]
-                print("[SeedKeeper] Entropy length:", entropy_len)
-
-                # Convert to mnemonic
-                mnemonic = bip39.mnemonic_from_bytes(entropy)
-                print("[SeedKeeper] Successfully converted to mnemonic")
+            # sk#1 fix (default search path): [mnemonic_size(1)|mnemonic_utf8|passphrase_size(1)|passphrase]
+            print("[SeedKeeper] Parsing BIP39 format (v0.2 layout)...")
+            if len(secret_data) >= 1:
+                mnemonic_len = secret_data[0]
+                mnemonic_bytes = bytes(secret_data[1:1 + mnemonic_len])
+                try:
+                    mnemonic = mnemonic_bytes.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    raise AppletException("BIP39 mnemonic is not valid UTF-8")
+                print("[SeedKeeper] Mnemonic length:", mnemonic_len)
                 return mnemonic
 
         raise AppletException("Invalid BIP39 secret format")
