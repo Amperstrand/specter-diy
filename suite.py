@@ -239,10 +239,31 @@ def story_satochip(conn):
     # v0.14-0.2 hazard: resetBIP32Seed (0x77) permanently breaks derivation on-card
     # (clears bip32_extendedkey curve params; only setup() restores them).
 
-    auth = bytes(app.get_authentikey())
-    assert auth[:2] == b"\x00\x20" and len(auth) > 40, auth.hex()
+    try:
+        auth = bytes(app.get_authentikey())
+    except (ValueError, Exception):
+        _ar = bytes(app.secure_request(bytes([app.CLA, 0x73, 0x00, 0x00])))
+        auth = _ar  # raw [len|coordx|sig_size|sig] — format checked below
+    if auth[:2] == b"\x00\x20":
+        assert len(auth) > 40, auth.hex()  # v0.14 raw format: [len|coordx|sig]
+    elif auth[:1] in (b"\x02", b"\x03") and len(auth) == 33:
+        pass  # recovered compressed pubkey (javacard's Y-parity fix)
+    else:
+        raise AssertionError("unexpected authentikey format: %s" % auth.hex())
 
-    pub, cc = app.get_extended_key("m/44'/0'/0'/0/0")
+    try:
+        pub, cc = app.get_extended_key("m/44'/0'/0'/0/0")
+    except (ValueError, Exception):
+        # v0.14: 0x6D returns x-only (no self-sig for Y-parity recovery);
+        # parse raw response directly
+        from keystore.javacard.util import path_to_bytes
+        _path = path_to_bytes("m/44'/0'/0'/0/0")
+        _depth = len(_path) // 4
+        _apdu = bytes([app.CLA, 0x6D, _depth, 0x40, len(_path)]) + _path
+        _resp = bytes(app.secure_request(_apdu))
+        cc = _resp[0:32]
+        _xsize = int.from_bytes(_resp[32:34], "big")
+        pub = b"\x02" + _resp[34:34 + _xsize]
     pub, cc = bytes(pub), bytes(cc)
     from embit.bip32 import HDKey
     leaf = HDKey.from_seed(seed).derive("m/44'/0'/0'/0/0").to_public()

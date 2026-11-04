@@ -49,7 +49,7 @@ class SatochipApplet(SecureAppletBase):
         """Get card status without secure channel (INS 0x3C)."""
         apdu = bytes([self.CLA, self.INS_GET_STATUS, 0x00, 0x00])
         data = self.conn.transmit(apdu)
-        resp_data, sw1, sw2 = data[0], data[1], data[2]
+        resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
         print("[Satochip] GET_STATUS response:", len(resp_data), "bytes")
         return resp_data
 
