@@ -479,7 +479,8 @@ class TestMode:
             if not getattr(ks, 'connected', False):
                 ks.connection.connect(ks.connection.T1_protocol)
                 ks.applet.select()
-                ks.applet.init_secure_channel()
+                if hasattr(ks.applet, 'init_secure_channel'):
+                    ks.applet.init_secure_channel()
                 ks.connected = True
             
             # Verify PIN
