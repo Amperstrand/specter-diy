@@ -89,7 +89,8 @@ class SecureAppletBase(Applet):
         
         # Transmit to card
         data = bytes(self.conn.transmit(encrypted_apdu))
-        resp_data, sw = data[:-2], data[-2:]
+        resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
+        sw = bytes([sw1, sw2])
         
         # Handle 9c30 - Secure Channel Required (corrupted channel)
         if sw == b"\x9c\x30" and retry:
@@ -99,7 +100,8 @@ class SecureAppletBase(Applet):
             # Retry command once with fresh encryption
             encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
             data = bytes(self.conn.transmit(encrypted_apdu))
-            resp_data, sw = data[:-2], data[-2:]
+            resp_data, sw1, sw2 = data[:-2], data[-2], data[-1]
+            sw = bytes([sw1, sw2])
         
         # Card-state failures: retrying or channel re-init cannot fix these.
         # SW remap per pysaudit conformance audit (fp#5/#6).

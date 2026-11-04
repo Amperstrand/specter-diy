@@ -20,19 +20,16 @@ class RecordingConnection:
 
     def transmit(self, apdu):
         self.apdus.append(bytes(apdu))
-        if bytes(apdu)[1] == 0x3C:  # v0.16 status: proto 0.10, setup done, sc on
-            return bytes.fromhex("001000010000000000010101") + b'\x90\x00'
-        return b'' + b'\x90\x00'
+        return (b'', 0x90, 0x00)
 
 
 def _applet(conn):
     from keystore.javacard.applets.satochip_applet import SatochipApplet
 
     applet = SatochipApplet(conn)
-    applet._sato_sc.is_initialized = True
-    applet._sato_sc.encrypt_apdu = MagicMock(
-        side_effect=lambda inner, cla=0xB0: bytes(inner))
-    applet._sato_sc.decrypt_response = MagicMock(side_effect=lambda resp: bytes(resp))
+    applet.sc.is_initialized = True
+    applet.sc.encrypt_apdu = MagicMock(side_effect=lambda inner: bytes(inner))
+    applet.sc.decrypt_response = MagicMock(side_effect=lambda resp: bytes(resp))
     return applet
 
 
@@ -81,8 +78,8 @@ class SatochipV016ConformanceTest(TestCase):
             conn.apdus.append(bytes(apdu))
             if bytes(apdu)[1] == 0x6D:  # chaincode(32)|coordx_size(2)|coordx(32)|sig_size(2)|auth_size(2)
                 resp = bytes(32) + (32).to_bytes(2, 'big') + bytes(32) + (0).to_bytes(2, 'big') + (0).to_bytes(2, 'big')
-                return bytes(resp) + b'\x90\x00'
-            return b'' + b'\x90\x00'
+                return (resp, 0x90, 0x00)
+            return (b'', 0x90, 0x00)
 
         conn.transmit = transmit
         applet = _applet(conn)
