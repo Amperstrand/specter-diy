@@ -43,4 +43,4 @@ platform.bootloader_locked = False
 platform.build_type = "debug"
 
 # uncomment to run some custom main:
-# full app: default main.py (specter + TestMode via hil_enabled)
+# full app: default main.py

@@ -159,16 +159,26 @@ else:
         except Exception as e:
             log("SC.xpub.%s.ERR" % path, str(e))
 
-    # sign a known hash, host verifies against m/84h xpub
+    # given: a known hash; when signed at explicit key slots; then: host-verified
     import hashlib
+    from binascii import hexlify
     msg = b"amperstrand m1 survey"
     h = hashlib.sha256(msg).digest()
     try:
-        sig = sc.sign_transaction_hash(0xFF, h)
-        from binascii import hexlify
-        log("SC.sign.ff", hexlify(bytes(sig)).decode()[:180])
+        # keynbr 0x00 = static key slot (not path-derived)
+        sig00 = sc.sign_transaction_hash(0x00, h)
+        log("SC.sign.key00.sig", hexlify(bytes(sig00)).decode()[:180])
     except Exception as e:
-        log("SC.sign.ff.ERR", str(e))
+        log("SC.sign.key00.ERR", str(e))
+    try:
+        # derive m/84h/0h/0h THEN sign with 0xFF (current path = 84h)
+        pub84, cc84 = sc.get_extended_key(sc._path_to_bytes("m/84h/0h/0h"))
+        sig84 = sc.sign_transaction_hash(0xFF, h)
+        log("SC.sign.84ff.sig", hexlify(bytes(sig84)).decode()[:180])
+        log("SC.sign.84ff.pub", hexlify(bytes(pub84)).decode())
+        log("SC.sign.84ff.cc", hexlify(bytes(cc84)).decode())
+    except Exception as e:
+        log("SC.sign.84ff.ERR", str(e))
 
     # PIN change round-trip
     try:
