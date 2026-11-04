@@ -104,3 +104,23 @@ Debug next: use keynbr=0x00 (static key) as control; or derive-then-immediately-
 - `os.path.isdir()` doesn't exist → use try/except os.stat()
 - SETUP must go through secure_request (not raw APDU)
 - The card reports even-Y pubkeys for some paths (try both prefixes for ECDH/verify)
+
+## Thread 2 findings (2026-11-04 01:20-01:30Z)
+
+### Satochip signature: ROOT CAUSE + FIX IDENTIFIED
+The `get_extended_key` client method sends P2=0x40 (non-hardened optimization).
+This causes the card to store a **watch-only** (public-key-only) version in its
+internal `bip32_extendedkey`. Subsequent `sign_transaction_hash(0xFF, ...)` uses
+this watch-only key → produces an unverifiable signature.
+
+**Evidence**: pysatochip reference (CardConnector.py line 3619) uses `p2 = 0x00`
+for the signing-path derivation, confirming the fix.
+
+**Fix for m2-satochip**: `satochip_applet.get_extended_key()` needs a `for_signing=True`
+parameter that sends P2=0x00 instead of 0x40. The `sign_hash` keystore method calls
+`get_extended_key(path, for_signing=True)` before `sign_transaction_hash(0xFF, ...)`.
+
+Other Thread 2 data:
+- `SC.sign.key00` → 9C10 = SW_KEY_NOT_FOUND (no static key imported; BIP32 seed only — expected)
+- `SC.seed_import` → 9C17 = SW_BIP32_INITIALIZED_SEED (seed already there — confirmed persistence)
+- All xpubs stable across reboots (same values from previous sessions)
