@@ -90,7 +90,7 @@ class EEPROMCorruptionTest(TestCase):
         with self.assertRaises(CardStateError) as ctx:
             applet.secure_request(bytes([cla, 0xA6, 0x00, 0x01]))
         self.assertIn('9c06', str(ctx.exception).lower())
-        self.assertIn('physical', str(ctx.exception).lower())
+        self.assertIn('pin', str(ctx.exception).lower())
 
     def test_no_retry_storm_on_9c06(self):
         """The client must not answer 9c06 with channel re-init or PIN retry
