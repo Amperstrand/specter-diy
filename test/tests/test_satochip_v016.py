@@ -100,3 +100,37 @@ class SatochipV016ConformanceTest(TestCase):
 if __name__ == '__main__':
     import unittest
     unittest.main()
+
+
+class Fp2FingerprintMatchingTest(TestCase):
+    """fp#2: PSBT matching must use master_fingerprint, never authentikey fp."""
+
+    def _mk_ks(self):
+        from keystore.satochip import Satochip
+        ks = Satochip.__new__(Satochip)
+        ks.master_fingerprint = None
+        ks.fingerprint = b'\xab\xcd\xef\x01'
+        ks._pin_unlocked = True
+        return ks
+
+    def test_sign_psbt_refuses_without_master_fp(self):
+        """sign_psbt returns 0 when master_fingerprint is None (no silent fallback)."""
+        ks = self._mk_ks()
+        result = ks.sign_psbt(None)
+        self.assertEqual(result, 0)
+
+    def test_sign_input_refuses_without_master_fp(self):
+        """sign_input returns 0 when master_fingerprint is None (no silent fallback)."""
+        ks = self._mk_ks()
+        result = ks.sign_input(None, 0, sig_stream=None)
+        self.assertEqual(result, 0)
+
+    def test_sign_psbt_never_uses_authentikey_fp(self):
+        """sign_psbt must not fall back to self.fingerprint (authentikey, random-at-install)."""
+        from unittest.mock import MagicMock, patch
+        ks = self._mk_ks()
+        ks.fingerprint = b'\x73\xc5\xda\x0a'
+        with patch.object(ks, 'sign_hash', MagicMock()) as mock_sign:
+            result = ks.sign_psbt(None)
+            self.assertEqual(result, 0)
+            mock_sign.assert_not_called()
