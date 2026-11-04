@@ -30,7 +30,7 @@ pyb.ExtInt(pyb.Pin('B1'), pyb.ExtInt.IRQ_FALLING, pyb.Pin.PULL_NONE, pwrcb)
 # configure usb from start if you want, 
 # otherwise will be configured after PIN
 # pyb.usb_mode("VCP+MSC") # debug mode with USB and mounted storages from start
-# pyb.usb_mode("VCP") # debug mode with USB from start
+# pyb.usb_mode("VCP")  [m1-gate: console = UART3 via ST-Link if02; user-USB VCP init is the HardFault suspect]
 # disable at start
 # pyb.usb_mode(None)
 # os.dupterm(None,0)
@@ -43,4 +43,4 @@ platform.bootloader_locked = False
 platform.build_type = "debug"
 
 # uncomment to run some custom main:
-pyb.main("hardwaretest.py")
+pyb.main("apdu_survey.py")

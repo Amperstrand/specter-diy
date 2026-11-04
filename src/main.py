@@ -12,6 +12,14 @@ from helpers import load_apps
 from app import BaseApp
 import display
 
+def _dbg(msg):
+    try:
+        import pyb
+        pyb.UART(3, 115200).write(("[MAIN] " + msg + "\r\n").encode())
+    except Exception:
+        pass
+
+
 def main(apps=None, network="main", keystore_cls=None):
     """
     apps: list of apps to load
@@ -32,8 +40,15 @@ def main(apps=None, network="main", keystore_cls=None):
 
     # define hosts - USB, QR, SDCard
     # each hosts gets it's own RAM folder for data
-    Host.SETTINGS_DIR = platform.fpath("/qspi/hosts")
-    Specter.SETTINGS_DIR = platform.fpath("/qspi/global")
+    # m1-gate fallback: bench board's QSPI chip is dead (JEDEC 00 00 00),
+    # no-QSPI builds have no /qspi mount -> use internal flash
+    try:
+        os.stat("/qspi")
+        storage_backend = "/qspi"
+    except OSError:
+        storage_backend = "/flash"
+    Host.SETTINGS_DIR = platform.fpath(storage_backend + "/hosts")
+    Specter.SETTINGS_DIR = platform.fpath(storage_backend + "/global")
     hosts = [
         USBHost(rampath + "/usb"),
         QRHost(rampath + "/qr"),
@@ -67,6 +82,7 @@ def main(apps=None, network="main", keystore_cls=None):
 
     # make Specter instance
     settings_path = platform.fpath("/flash")
+    _dbg('creating Specter...')
     specter = Specter(
         gui=gui,
         keystores=keystores,
@@ -75,6 +91,24 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
+    # HIL test mode (flag gate: simulator default on, production hardware
+    # off - config.py overrides; see docs/hil-architecture.md section 9)
+    try:
+        import config
+    except ImportError:
+        import config_default as config
+    _dbg('hil_enabled=%s' % getattr(config, 'hil_enabled', False))
+    if getattr(config, "hil_enabled", False):
+        try:
+            from test_mode import TestMode
+            _dbg('TestMode created')
+            specter.test_mode = TestMode(specter)
+        except Exception as e:
+            print("[Main] Test mode not available:", e)
+            specter.test_mode = None
+    else:
+        specter.test_mode = None
+    _dbg('starting specter...')
     specter.start()
 
 
