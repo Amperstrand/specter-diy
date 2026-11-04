@@ -123,11 +123,7 @@ class Satochip(JavaCardKeyStore):
         
         pin_attempts = None
         try:
-<<<<<<< HEAD
             resp_data = self.applet.get_card_status()
-=======
-            resp_data, sw1, sw2 = self.applet.get_card_status()
->>>>>>> cardbench/m2-seedkeeper-store-side
             if len(resp_data) >= 8:
                 pin_attempts = resp_data[4]
                 print('[BootTrace][Satochip] PIN attempts remaining:', pin_attempts)
@@ -146,11 +142,7 @@ class Satochip(JavaCardKeyStore):
             except PinError as e:
                 await self.show(Alert('PIN Error', str(e)))
                 try:
-<<<<<<< HEAD
                     resp_data = self.applet.get_card_status()
-=======
-                    resp_data, sw1, sw2 = self.applet.get_card_status()
->>>>>>> cardbench/m2-seedkeeper-store-side
                     if len(resp_data) >= 8:
                         pin_attempts = resp_data[4]
                 except:
@@ -275,11 +267,7 @@ class Satochip(JavaCardKeyStore):
             
             # Get card status for version info
             try:
-<<<<<<< HEAD
                 resp_data = self.applet.get_card_status()
-=======
-                resp_data, sw1, sw2 = self.applet.get_card_status()
->>>>>>> cardbench/m2-seedkeeper-store-side
                 status = self.applet.parse_status(resp_data)
                 
                 if status:
@@ -491,18 +479,10 @@ class Satochip(JavaCardKeyStore):
         print('[Satochip] sign_psbt called')
         sig_count = 0
         
-<<<<<<< HEAD
-        # fp#2: use master_fingerprint for PSBT matching
-        my_fp = self.master_fingerprint or self.fingerprint
-=======
         if self.master_fingerprint is None:
             print('[Satochip] No master fingerprint (seed not imported?), cannot sign')
             return 0
         my_fp = self.master_fingerprint
->>>>>>> cardbench/m2-seedkeeper-store-side
-        if my_fp is None:
-            print('[Satochip] No fingerprint set, cannot sign')
-            return 0
         
         # Iterate over inputs
         for i, inp in enumerate(psbt.inputs):
@@ -600,10 +580,11 @@ class Satochip(JavaCardKeyStore):
         
         print('[Satochip] sign_input called for input %d' % i)
         
-        # Get fingerprint
-        my_fp = self.fingerprint
-        if my_fp is None:
+        # fp#2: sign_input uses master_fingerprint too (not authentikey)
+        if self.master_fingerprint is None:
+            print('[Satochip] No master fingerprint, cannot sign input')
             return 0
+        my_fp = self.master_fingerprint
         
         inp = psbtv.input(i)
         if extra_scope_data:

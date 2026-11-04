@@ -5,7 +5,6 @@ from gui.specter import SpecterGUI
 from keystore.core import KeyStore
 from keystore.sdcard import SDKeyStore
 from keystore.memorycard import MemoryCard
-from keystore.seedkeeper import SeedKeeper
 from keystore.satochip import Satochip
 
 from hosts import SDHost, QRHost, USBHost, Host
@@ -60,7 +59,6 @@ def main(apps=None, network="main", keystore_cls=None):
     else:
         keystores = [
             MemoryCard,
-            SeedKeeper,
             Satochip,
             SDKeyStore,
         ]
