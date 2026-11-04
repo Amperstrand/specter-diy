@@ -18,6 +18,38 @@ IV_SIZE = 16
 MAC_SIZE = 20
 AES_CBC = 2
 
+def recover_pubkey_from_sig(coordx, sig_der):
+    """Recover the full compressed pubkey from an x-only coord + self-signature."""
+    import hashlib
+    msg = (len(coordx)).to_bytes(2, 'big') + bytes(coordx)
+    h = hashlib.sha256(msg).digest()
+    sig = secp256k1.ecdsa_signature_parse_der(bytes(sig_der))
+    for prefix in (b'\x02', b'\x03'):
+        pub = secp256k1.ec_pubkey_parse(prefix + bytes(coordx))
+        if secp256k1.ecdsa_verify(sig, h, pub):
+            return prefix + bytes(coordx)
+    raise ValueError("pubkey recovery failed: signature invalid for both parities")
+
+
+def parse_xpub_response(resp):
+    """Parse a coordx+sig response, recovering the full pubkey.
+
+    Format: [coordx_size(2) | coordx(N) | sig_size(2) | sig(N)]
+    Returns: (compressed_pubkey_33B, remaining_bytes_after_sig)
+    """
+    if len(resp) < 4:
+        raise ValueError("response too short for coordx+sig")
+    coordx_size = (resp[0] << 8) | resp[1]
+    if len(resp) < 2 + coordx_size + 2:
+        raise ValueError("response truncated before signature")
+    coordx = bytes(resp[2:2 + coordx_size])
+    sig_off = 2 + coordx_size
+    sig_size = (resp[sig_off] << 8) | resp[sig_off + 1]
+    sig = bytes(resp[sig_off + 2:sig_off + 2 + sig_size])
+    pub = recover_pubkey_from_sig(coordx, sig)
+    return pub, resp[sig_off + 2 + sig_size:]
+
+
 
 def hmac_sha1(key: bytes, msg: bytes) -> bytes:
     """

@@ -89,13 +89,18 @@ class SatochipApplet(SecureAppletBase):
         return (True, None)
 
     def get_authentikey(self):
-        """Get authentikey for fingerprint derivation (INS 0x73)."""
+        """Get authentikey — recovered from self-signature (fp#3).
+
+        Returns: 33-byte compressed pubkey (device identity).
+        """
         apdu = bytes([self.CLA, self.INS_BIP32_GET_AUTHENTIKEY, 0x00, 0x00])
         print("[Satochip] TX (encrypted): GET_AUTHENTIKEY")
 
         resp = self.secure_request(apdu)
         print("[Satochip] Authentikey received:", len(resp), "bytes")
-        return resp  # Returns raw pubkey bytes (65 bytes uncompressed)
+        from .seedkeeper_securechannel import parse_xpub_response
+        pubkey, _ = parse_xpub_response(resp)
+        return pubkey
 
     def get_extended_key(self, path):
         """Get extended key (pubkey + chaincode) at derivation path (INS 0x6D).
@@ -128,27 +133,18 @@ class SatochipApplet(SecureAppletBase):
         
         resp = self.secure_request(apdu)
         print("[Satochip] Extended key response:", len(resp), "bytes")
-        
-        # Parse response: chaincode(32) | coordx_size(2) | coordx | ...
+
         if len(resp) < 66:
             raise AppletException("Invalid extended key response: %d bytes" % len(resp))
-        
-        chaincode = resp[0:32]
-        coordx_size = int.from_bytes(resp[32:34], 'big')
-        
-        if coordx_size != 32:
-            print("[Satochip] Warning: coordx_size=", coordx_size, "expected 32")
-        
-        coordx = resp[34:34+coordx_size]
-        
-        # Construct compressed pubkey: 0x02 or 0x03 prefix + coordx
-        # We default to 0x02 (even y) - if signature verification fails, try 0x03
-        # For now, use 0x02 as default
-        pubkey = b'\x02' + coordx
-        
+
+        chaincode = bytes(resp[0:32])
+        # fp#3: recover pubkey from self-sig (not blind 0x02 prefix)
+        from .seedkeeper_securechannel import parse_xpub_response
+        pubkey, _ = parse_xpub_response(resp[32:])
+
         print("[Satochip] Chaincode:", hexlify(chaincode))
-        print("[Satochip] Pubkey (compressed):", hexlify(pubkey))
-        
+        print("[Satochip] Pubkey (recovered):", hexlify(pubkey))
+
         return (pubkey, chaincode)
     
     def _path_to_bytes(self, path_str):
