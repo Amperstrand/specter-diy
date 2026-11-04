@@ -218,34 +218,36 @@ class PinExceptionHandlingTest(TestCase):
     """Tests for handle_pin_iso_exception() utility function."""
     
     def test_bricked_card_9c0c(self):
-        """Test 9C0C status word raises CriticalError."""
+        """9C0C = PIN blocked, PUK-recoverable — NOT a wipe signal."""
         try:
             from keystore.javacard.util import handle_pin_iso_exception
             from keystore.javacard.applets.applet import ISOException
-            from platform import CriticalErrorWipeImmediately
-            
+            from keystore.core import PinError
+
             e = ISOException("9c0c")
             attempts, should_raise, exc = handle_pin_iso_exception(e)
-            
+
             self.assertEqual(attempts, 0)
             self.assertTrue(should_raise)
-            self.assertIsInstance(exc, type(CriticalErrorWipeImmediately("")))
+            self.assertIsInstance(exc, PinError)  # PUK-recoverable
+            self.assertIn("PUK", str(exc))
         except ImportError:
             self.skipTest("handle_pin_iso_exception not yet implemented")
-    
+
     def test_bricked_card_6983(self):
-        """Test 6983 status word raises CriticalError."""
+        """6983 = PIN blocked (ISO), PUK-recoverable — NOT a wipe signal."""
         try:
             from keystore.javacard.util import handle_pin_iso_exception
             from keystore.javacard.applets.applet import ISOException
-            from platform import CriticalErrorWipeImmediately
-            
+            from keystore.core import PinError
+
             e = ISOException("6983")
             attempts, should_raise, exc = handle_pin_iso_exception(e)
-            
+
             self.assertEqual(attempts, 0)
             self.assertTrue(should_raise)
-            self.assertIsInstance(exc, type(CriticalErrorWipeImmediately("")))
+            self.assertIsInstance(exc, PinError)  # PUK-recoverable
+            self.assertIn("PUK", str(exc))
         except ImportError:
             self.skipTest("handle_pin_iso_exception not yet implemented")
     
@@ -301,18 +303,20 @@ class CardDetectionTest(TestCase):
     """Tests for card type detection (Phase 4)."""
     
     def test_aid_constants_exist(self):
-        """Test that AID constants are defined."""
+        """AIDs of the applets present in this module (Satochip: m2-satochip)."""
         try:
             from keystore.javacard.applets.memorycard import MemoryCardApplet
-            from keystore.javacard.applets.satochip_applet import SatochipApplet
+            from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
 
-            self.assertIsInstance(SatochipApplet.AID, bytes)
-            self.assertEqual(len(SatochipApplet.AID), 8)
-                                    
-            # Verify AIDs are bytes
-            
-            # Verify lengths
-            
+            self.assertIsInstance(SeedKeeperApplet.AID, bytes)
+            self.assertEqual(len(SeedKeeperApplet.AID), 10)
+
+            class MockConnection:
+                pass
+
+            self.assertEqual(
+                MemoryCardApplet(MockConnection()).aid, b"\xB0\x0B\x51\x11\xCB\x01"
+            )
         except ImportError as e:
             self.skipTest(f"Applet not available: {e}")
 
