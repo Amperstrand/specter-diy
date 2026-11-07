@@ -213,6 +213,10 @@ class TestMode:
                 self._respond("OK:REBOOTING")
                 import pyb
                 pyb.hard_reset()
+            elif cmd == "TEST_CMD_ECHO":
+                await self._cmd_echo()
+            elif cmd.startswith("TEST_OPEN_EE"):
+                await self._cmd_open_ee()
             else:
                 self._respond("ERROR:Unknown command")
         except Exception as e:
@@ -292,6 +296,38 @@ class TestMode:
             for i in range(n):
                 row.append("%04x" % mem16(base + (off + i) * 2))
             self._event("fb", seq=off // chunk, rgb565="".join(row))
+
+    async def _cmd_echo(self):
+        """SC-path echo probe: sends CMD_ECHO through the MemoryCard secure channel.
+        Discriminates: SC alive + applet responsive = OK; SC dead = error; applet wedged = timeout/6984."""
+        ks = self.find_javacard_keystore()
+        if ks is None or not hasattr(ks, 'applet'):
+            self._respond("ERROR:No keystore")
+            return
+        try:
+            resp = ks.applet.sc.request(b"\x00\x00ping")
+            if bytes(resp) == b"ping":
+                self._respond("OK:ECHO:SC_ALIVE")
+            else:
+                self._respond("OK:ECHO:MISMATCH:" + str(resp)[:60])
+        except Exception as e:
+            self._respond("ERROR:ECHO:" + str(e))
+
+    async def _cmd_open_ee(self):
+        """Raw-path probe: sends INS 0xB5 directly (no secure channel).
+        Discriminates: card ISD responds = OK; no response = card-floor wedge."""
+        ks = self.find_javacard_keystore()
+        if ks is None or not hasattr(ks, 'connection'):
+            self._respond("ERROR:No keystore")
+            return
+        try:
+            conn = ks.connection
+            apdu = bytes([0xB0, 0xB5, 0x00, 0x00])
+            resp, sw1, sw2 = conn.transmit(apdu)
+            sw = (sw1 << 8) | sw2
+            self._respond("OK:EE:SW=%04X:LEN=%d" % (sw, len(bytes(resp))))
+        except Exception as e:
+            self._respond("ERROR:EE:" + str(e))
 
     async def _cmd_wipe_secrets(self):
         """Delete all card secrets (issue #22 HIL flow).
