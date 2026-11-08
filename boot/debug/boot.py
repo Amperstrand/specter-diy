@@ -30,7 +30,7 @@ pyb.ExtInt(pyb.Pin('B1'), pyb.ExtInt.IRQ_FALLING, pyb.Pin.PULL_NONE, pwrcb)
 # configure usb from start if you want, 
 # otherwise will be configured after PIN
 # pyb.usb_mode("VCP+MSC") # debug mode with USB and mounted storages from start
-# pyb.usb_mode("VCP")  [m1-gate: console = UART3 via ST-Link if02; user-USB VCP init is the HardFault suspect]
+pyb.usb_mode("VCP")  # D8: enables UART3 output path on the ST-Link VCP (proven v2.2.4)
 # disable at start
 # pyb.usb_mode(None)
 # os.dupterm(None,0)
