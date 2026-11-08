@@ -47,6 +47,25 @@ class TestMode:
             except Exception as e:
                 print("[TestMode] UART3 init failed:", e)
 
+        # v2.2.7: UART3-visible exception handler — every task death
+        # app-wide writes the traceback to the proven ACM0 carrier
+        if self.uart is not None:
+            import sys as _sys
+            _uart = self.uart  # capture — handler must not touch self
+            def _tm_exc_handler(loop, context):
+                try:
+                    import uio as _uio
+                    buf = _uio.StringIO()
+                    _sys.print_exception(context.get('exception', context), buf)
+                    tb = buf.getvalue()
+                    _uart.write(b"[TASK-DIED] " + str(tb)[:200].encode() + b"\r\n")
+                except Exception:
+                    pass  # last resort: nothing more we can do
+            try:
+                _sys.set_exception_handler(_tm_exc_handler)
+            except Exception:
+                pass
+
         # P6: structured JSON-lines events on the UART channel
         self.jsonl = self.uart is not None
         # V2.2: serialize channel-touching commands (prevents concurrent
