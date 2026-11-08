@@ -1,4 +1,5 @@
 from ..util import encode
+from .applet import ISOException
 import secp256k1
 import hashlib, hmac
 from io import BytesIO
@@ -178,16 +179,32 @@ class SecureChannel:
         return b"\x80".join(arr[:-1])
 
     def request(self, data):
-        """Sends a secure request to the card
-        and returns decrypted result.
+        """Sends a secure request to the card and returns decrypted result.
         Raises a SecureError if errorcode returned from the card.
+        V2.2: 6984 -> reopen channel once, retry; other SWs never reopen.
         """
-        # if counter reached maximum - reestablish channel
         if self.iv >= 2 ** 16 or not self.is_open:
             self.open()
         ct = self.encrypt(data)
-        res = self.applet.request(self.SECURE_MSG + encode(ct))
-        plaintext = self.decrypt(res)
+        try:
+            res = self.applet.request(self.SECURE_MSG + encode(ct))
+        except ISOException as e:
+            self.is_open = False
+            if str(e) == "6984" and not getattr(self, '_in_retry', False):
+                self._in_retry = True
+                try:
+                    self.open()
+                    ct = self.encrypt(data)
+                    res = self.applet.request(self.SECURE_MSG + encode(ct))
+                finally:
+                    self._in_retry = False
+            else:
+                raise
+        try:
+            plaintext = self.decrypt(res)
+        except SecureChannelError:
+            self.is_open = False
+            raise
         self.iv += 1
         if plaintext[:2] == self.SUCCESS:
             return plaintext[2:]

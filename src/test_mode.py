@@ -49,6 +49,10 @@ class TestMode:
 
         # P6: structured JSON-lines events on the UART channel
         self.jsonl = self.uart is not None
+        # V2.2: serialize channel-touching commands (prevents concurrent
+        # writers from racing the secure channel — each race costs a session)
+        import asyncio as _aio
+        self._ch_lock = _aio.Lock()
         self._last_reply = None
         self._current_cmd = None
 
@@ -300,18 +304,19 @@ class TestMode:
     async def _cmd_echo(self):
         """SC-path echo probe: sends CMD_ECHO through the MemoryCard secure channel.
         Discriminates: SC alive + applet responsive = OK; SC dead = error; applet wedged = timeout/6984."""
-        ks = self.find_javacard_keystore()
-        if ks is None or not hasattr(ks, 'applet'):
-            self._respond("ERROR:No keystore")
-            return
-        try:
-            resp = ks.applet.sc.request(b"\x00\x00ping")
-            if bytes(resp) == b"ping":
-                self._respond("OK:ECHO:SC_ALIVE")
-            else:
-                self._respond("OK:ECHO:MISMATCH:" + str(resp)[:60])
-        except Exception as e:
-            self._respond("ERROR:ECHO:" + str(e))
+        async with self._ch_lock:
+            ks = self.find_javacard_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERROR:No keystore")
+                return
+            try:
+                resp = ks.applet.sc.request(b"\x00\x00ping")
+                if bytes(resp) == b"ping":
+                    self._respond("OK:ECHO:SC_ALIVE")
+                else:
+                    self._respond("OK:ECHO:MISMATCH:" + str(resp)[:60])
+            except Exception as e:
+                self._respond("ERROR:ECHO:" + str(e))
 
     async def _cmd_open_ee(self):
         """Raw-path probe: sends INS 0xB5 directly (no secure channel).
@@ -515,16 +520,17 @@ class TestMode:
             return
         
         try:
-            # Connect if needed
-            if not getattr(ks, 'connected', False):
-                ks.connection.connect(ks.connection.T1_protocol)
-                ks.applet.select()
-                if hasattr(ks.applet, 'init_secure_channel'):
-                    ks.applet.init_secure_channel()
-                ks.connected = True
-            
-            # Verify PIN
-            ks._unlock(pin)
+            async with self._ch_lock:
+                # Connect if needed
+                if not getattr(ks, 'connected', False):
+                    ks.connection.connect(ks.connection.T1_protocol)
+                    ks.applet.select()
+                    if hasattr(ks.applet, 'init_secure_channel'):
+                        ks.applet.init_secure_channel()
+                    ks.connected = True
+
+                # Verify PIN
+                ks._unlock(pin)
             self._respond("OK:PIN verified")
             
             # Get keystore-specific identity information
