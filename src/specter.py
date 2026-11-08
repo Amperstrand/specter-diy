@@ -166,9 +166,10 @@ class Specter:
                 if keystore.is_available():
                     keystore_cls = keystore
                     break
-            # if none are available just wait for it
-            # if keystore_cls is None:
-            #     await asyncio.sleep_ms(50)
+            # v2.2.2: yield so cooperative scheduler can run TestMode
+            # (uncommented from upstream TODO — tight loop starved the event loop)
+            if keystore_cls is None:
+                await asyncio.sleep_ms(50)
         self.keystore = keystore_cls()
 
     async def setup(self):
