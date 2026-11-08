@@ -219,6 +219,13 @@ class TestMode:
                 pyb.hard_reset()
             elif cmd == "TEST_CMD_ECHO":
                 await self._cmd_echo()
+            elif cmd == "TEST_RING":
+                ring = getattr(self, 'diag_ring', None)
+                if ring:
+                    self._respond("OK:RING:%d entries" % ring.count())
+                    print(ring.flush_text())
+                else:
+                    self._respond("ERROR:No ring")
             elif cmd.startswith("TEST_OPEN_EE"):
                 await self._cmd_open_ee()
             else:
