@@ -13,9 +13,25 @@ from app import BaseApp
 import display
 
 def _dbg(msg):
+    # D2: app's UART3 path (the suspected dead path)
     try:
         import pyb
-        pyb.UART(3, 115200).write(("[MAIN] " + msg + "\r\n").encode())
+        pyb.UART(3, 115200).write(("[MAIN-D2] " + msg + "\r\n").encode())
+    except Exception:
+        pass
+    # D1: known-good path — print() to VCP/REPL (works in diagnostic era)
+    try:
+        print("[MAIN-D1] " + msg)
+    except Exception:
+        pass
+
+
+def _dbg_stlk(msg):
+    # D1: platform.py's stlk path ("YB" @ 9600, the proven diagnostic transport)
+    try:
+        import platform
+        if hasattr(platform, 'stlk'):
+            platform.stlk.write(("[MAIN-D1-stlk] " + msg + "\r\n").encode())
     except Exception:
         pass
 
