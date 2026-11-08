@@ -43,4 +43,4 @@ platform.bootloader_locked = False
 platform.build_type = "debug"
 
 # uncomment to run some custom main:
-pyb.main("apdu_survey.py")
+# pyb.main("apdu_survey.py")
