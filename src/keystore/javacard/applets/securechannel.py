@@ -195,7 +195,12 @@ class SecureChannel:
                 try:
                     self.open()
                     ct = self.encrypt(data)
-                    res = self.applet.request(self.SECURE_MSG + encode(ct))
+                    try:
+                        res = self.applet.request(self.SECURE_MSG + encode(ct))
+                    except ISOException:
+                        self.is_open = False
+                        self.iv = 0
+                        raise
                 finally:
                     self._in_retry = False
             else:
