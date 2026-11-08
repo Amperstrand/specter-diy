@@ -94,21 +94,27 @@ class TestMode:
     def _default_account_path(self):
         return "m/84h/%dh/0h" % self._coin_type()
     
+
+    def _uart_write(self, msg):
+        """Print-quarantined UART3 write (no-op if UART not available)."""
+        if self.uart is not None:
+            try:
+                self.uart.write((msg + "\r\n").encode())
+            except Exception:
+                pass
+
     async def _command_loop(self):
         """Main command processing loop - called from Specter.setup()."""
-        print("[TestMode] Starting command loop...")
-        
         import asyncio
-        
+
         self.running = True
         buffer = ""
-        
-        print("[TestMode] Ready for commands. Send TEST_STATUS to check.")
-        # UART3 heartbeat: proves the loop is alive even without commands
+
+        # T5: FIRST statement — UART3 write on the proven carrier, no print()
         self._hb_count = 0
         if self.uart is not None:
-            self.uart.write(b"[TestMode] ALIVE on UART3\r\n")
-        
+            self.uart.write(b"[TestMode] ALIVE T5\r\n")
+
         while self.running:
             try:
                 # Try to read from stdin using uselect (MicroPython)
@@ -132,7 +138,7 @@ class TestMode:
                         await asyncio.sleep_ms(50)
                         
                 except Exception as e:
-                    print("[TestMode] Poll error:", e)
+                    self._uart_write("[TestMode] Poll error: " + str(e))
                     await asyncio.sleep_ms(100)
 
                 # heartbeat (100 iterations x ~50ms poll timeout = ~5s)
@@ -141,12 +147,17 @@ class TestMode:
                     self._hb_count = 0
                     self.uart.write(b"[TestMode] HB\r\n")
 
-                # P6: card hotplug detection ~every second (20 x 50ms)
+                # P6: card hotplug detection + yield after each card op
                 if not platform.simulator:
                     self._hotplug_counter += 1
                     if self._hotplug_counter >= 20:
                         self._hotplug_counter = 0
+                        if self._hb_count == 1:
+                            self._uart_write("T6a:pre-hotplug")
                         self._poll_card_hotplug()
+                        if self._hb_count == 1:
+                            self._uart_write("T6b:post-hotplug")
+                        await asyncio.sleep_ms(0)
 
                 # Poll UART3 VCP for HIL testing (hardware only)
                 if not platform.simulator and self.uart and self.uart.any():
@@ -159,15 +170,15 @@ class TestMode:
                                 self._current_cmd = cmd_str
                                 await self._process_command(cmd_str)
                     except Exception as e:
-                        print("[TestMode] UART error:", e)
+                        self._uart_write("[TestMode] UART error: " + str(e))
                         
             except Exception as e:
-                print("[TestMode] Error in command loop:", e)
+                self._uart_write("[TestMode] CmdLoop error: " + str(e))
                 await asyncio.sleep_ms(100)
     
     async def _process_command(self, cmd):
         """Process a single command."""
-        print("[TestMode] CMD:", cmd)
+        self._uart_write("[TestMode] CMD: " + cmd)
         
         try:
             if cmd == "TEST_STATUS":
@@ -241,7 +252,7 @@ class TestMode:
             fields["event"] = kind
             self.uart.write(("J:" + json.dumps(fields) + "\n").encode())
         except Exception as e:
-            print("[TestMode] event emit failed:", e)
+            pass  # quarantined: event emit failure is non-fatal
 
     def _emit_result_event(self):
         if self._current_cmd is None:
@@ -375,12 +386,12 @@ class TestMode:
             try:
                 self.uart.write((msg + '\n').encode())
             except Exception as e:
-                print("[TestMode] UART write error:", e)
+                pass  # quarantined: UART write error during write
                 # Fallback to print
-                print("[TestMode] RESP:", msg)
+                self._uart_write("[TestMode] RESP: " + str(msg))
         else:
             # Route to stdout (stdin source or fallback)
-            print("[TestMode] RESP:", msg)
+            self._uart_write("[TestMode] RESP: " + str(msg))
     
     async def _cmd_status(self):
         """Get current status."""
@@ -539,7 +550,7 @@ class TestMode:
             # For Satochip: get authentikey and derive fingerprint
             if keystore_type == "Satochip":
                 authentikey_bytes = ks.applet.get_authentikey()
-                print("[TestMode] Authentikey length:", len(authentikey_bytes) if authentikey_bytes else 0)
+                self._uart_write("[TestMode] Authentikey len: " + str(len(authentikey_bytes) if authentikey_bytes else 0))
                 
                 if authentikey_bytes:
                     import hashlib

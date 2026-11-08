@@ -179,7 +179,7 @@ class Specter:
             if hasattr(self, 'test_mode') and self.test_mode is not None:
                 try:
                     import asyncio
-                    asyncio.create_task(self.test_mode._command_loop())
+                    self._tm_task = asyncio.create_task(self.test_mode._command_loop())
                     print("[Specter] Test mode started")
                 except Exception as e:
                     print("[Specter] Failed to start test mode:", e)
