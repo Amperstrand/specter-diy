@@ -2,6 +2,7 @@ from .core import KeyStoreError, PinError
 from .ram import RAMKeyStore
 from .javacard.applets.seedkeeper_applet import SeedKeeperApplet, _is_bip39_header
 from .javacard.applets.applet import AppletException
+from .javacard.applets.satochip_securechannel import SecureChannelError
 from .javacard.util import get_connection
 from platform import CriticalErrorWipeImmediately
 import platform
@@ -286,6 +287,9 @@ class SeedKeeper(RAMKeyStore):
         except AppletException as e:
             await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
             return False
+        except SecureChannelError as e:
+            await self.show(Alert('Error', 'Failed to load key from card:\n%s' % str(e)))
+            return False
         except KeyStoreError as e:
             await self.show(Alert('Error', str(e)))
             return False
@@ -325,7 +329,8 @@ class SeedKeeper(RAMKeyStore):
             if menuitem == 255:
                 return False
             elif menuitem == 0:
-                await self.load_mnemonic()
+                if not await self.load_mnemonic():
+                    return False
                 await self.show(
                     Alert("Success!", "Your key is loaded from SeedKeeper.", button_text="OK")
                 )

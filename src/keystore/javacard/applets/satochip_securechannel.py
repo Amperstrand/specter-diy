@@ -15,6 +15,10 @@ from rng import get_random_bytes
 AES_BLOCK = 16
 
 
+class SecureChannelError(Exception):
+    """Card response is malformed or undecryptable (see decrypt_response)."""
+
+
 def hmac_sha1(key: bytes, msg: bytes) -> bytes:
     BLOCK_SIZE = 64
     if len(key) > BLOCK_SIZE:
@@ -135,10 +139,35 @@ class SatochipSecureChannel:
         return wrapped
 
     def decrypt_response(self, encrypted_response: bytes) -> bytes:
-        card_iv = encrypted_response[:16]
-        data_size = int.from_bytes(encrypted_response[16:18], 'big')
-        ciphertext = encrypted_response[18:18 + data_size]
+        """Decrypt a card response envelope: [IV(16) | size(2) | ciphertext].
 
-        cipher = aes(self.aes_key, 2, card_iv)
-        plaintext = cipher.decrypt(ciphertext)
-        return pkcs7_unpad(plaintext)
+        The card's response envelope carries NO MAC — only client->card
+        requests are authenticated. Verified from the card-side sources:
+        Toporin/SatochipApplet SecureChannel.wrap() and the
+        Toporin/Seedkeeper-Applet response path both emit exactly
+        IV|size|ciphertext with no HMAC over the response, and
+        Toporin/pysatochip's decrypt_secure_channel() documents "The card
+        response carries no MAC (the applet does not send one)". With no
+        tag to verify, the client must fail closed on any envelope that
+        does not match the wire format exactly, instead of decrypting
+        whatever arrives (issue #52).
+        """
+        try:
+            if len(encrypted_response) < 18:
+                raise ValueError(
+                    "response shorter than the IV(16)+size(2) header")
+            card_iv = bytes(encrypted_response[:16])
+            data_size = int.from_bytes(encrypted_response[16:18], 'big')
+            if data_size == 0 or (data_size % AES_BLOCK) != 0:
+                raise ValueError(
+                    "ciphertext size %d is not a positive multiple of %d"
+                    % (data_size, AES_BLOCK))
+            if len(encrypted_response) != 18 + data_size:
+                raise ValueError(
+                    "envelope length %d does not match declared ciphertext "
+                    "size %d" % (len(encrypted_response), data_size))
+            cipher = aes(self.aes_key, 2, card_iv)
+            plaintext = cipher.decrypt(bytes(encrypted_response[18:]))
+            return pkcs7_unpad(plaintext)
+        except ValueError as e:
+            raise SecureChannelError("malformed card response: %s" % e)
