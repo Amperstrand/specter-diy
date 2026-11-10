@@ -69,6 +69,7 @@ def main():
 
         test_files = [
             ("test_basic", "test_basic.py"),
+            ("test_seedkeeper", "test_seedkeeper.py"),
         ]
 
         if rpc_available():

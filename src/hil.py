@@ -140,6 +140,31 @@ class HILCommandHandler:
             self._wipe_storage()
             return
 
+        # TEST_SECRETS - list BIP39 secret IDs and labels from SeedKeeper
+        if line == "TEST_SECRETS":
+            self._list_secrets()
+            return
+
+        # TEST_ALL_SECRETS - list ALL secrets (including descriptors, passwords, etc.)
+        if line == "TEST_ALL_SECRETS":
+            self._list_all_secrets()
+            return
+
+        # TEST_IMPORT_SECRET:<hex_data>[:<label>] - import BIP39 secret to card
+        if line.startswith("TEST_IMPORT_SECRET:"):
+            self._import_secret(line[len("TEST_IMPORT_SECRET:"):])
+            return
+
+        # TEST_DELETE_SECRET:<sid> - delete secret by ID
+        if line.startswith("TEST_DELETE_SECRET:"):
+            self._delete_secret(line[len("TEST_DELETE_SECRET:"):])
+            return
+
+        # TEST_CARD_RESET - power cycle the smartcard (disconnect + reconnect)
+        if line == "TEST_CARD_RESET":
+            self._card_reset()
+            return
+
         # TEST_FINGERPRINT - get current keystore fingerprint
         if line == "TEST_FINGERPRINT":
             self._get_fingerprint()
@@ -284,3 +309,105 @@ class HILCommandHandler:
         except Exception as e:
             log_exception("HIL", e)
             self._respond("ERR:MNEMONIC_FAIL")
+
+    def _list_secrets(self):
+        try:
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            headers = ks.applet.list_secret_headers()
+            bip39 = [
+                h for h in headers
+                if h['type'] in (0x10, 0x30, 0x31)
+                and (h['type'] != 0x10 or h.get('subtype') == 1)
+            ]
+            parts = []
+            for h in bip39:
+                label = h.get('label', '')
+                if not isinstance(label, str) or len(label) == 0:
+                    label = 'Secret #%d' % h['id']
+                fp = h.get('fingerprint', '????????')
+                parts.append("%d:%s:%s" % (h['id'], label, fp))
+            self._respond("OK:SECRETS:%s" % ",".join(parts))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:SECRETS_FAIL")
+
+    def _list_all_secrets(self):
+        try:
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            headers = ks.applet.list_secret_headers()
+            type_names = {
+                0x10: "MASTERSEED", 0x30: "BIP39", 0x31: "BIP39v2",
+                0x40: "ELECTRUM", 0x90: "PASSWORD", 0xC0: "DATA",
+                0xC1: "DESCRIPTOR",
+            }
+            parts = []
+            for h in headers:
+                label = h.get('label', '')
+                if not isinstance(label, str) or len(label) == 0:
+                    label = 'Secret #%d' % h['id']
+                tname = type_names.get(h['type'], "0x%02x" % h['type'])
+                fp = h.get('fingerprint', '????????')
+                parts.append("%d:%s:%s:%s" % (h['id'], tname, label, fp))
+            self._respond("OK:ALL_SECRETS:%s" % ",".join(parts))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:ALL_SECRETS_FAIL")
+
+    def _import_secret(self, args):
+        try:
+            from binascii import unhexlify
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            parts = args.split(":", 1)
+            hex_data = parts[0].strip()
+            label = parts[1].strip() if len(parts) > 1 else ""
+            secret_data = unhexlify(hex_data)
+            sid, fp = ks.applet.import_secret(secret_data, secret_type=0x30, label=label)
+            self._respond("OK:IMPORT:%d:%s" % (sid, fp))
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:IMPORT_FAIL:%s" % str(e))
+
+    def _delete_secret(self, sid_str):
+        try:
+            ks = _get_keystore()
+            if ks is None or not hasattr(ks, 'applet'):
+                self._respond("ERR:NO_SEEDKEEPER")
+                return
+            sid = int(sid_str.strip())
+            ks.applet.delete_secret(sid)
+            self._respond("OK:DELETED:%d" % sid)
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:DELETE_FAIL:%s" % str(e))
+
+    def _card_reset(self):
+        try:
+            import time as _time
+            from keystore.javacard.util import get_connection
+            ks = _get_keystore()
+            conn = get_connection()
+            try:
+                conn.disconnect()
+            except Exception:
+                pass
+            _time.sleep_ms(500)
+            conn.connect(conn.T1_protocol)
+            if ks is not None and hasattr(ks, 'applet'):
+                ks.applet.select()
+                ks.applet.init_secure_channel()
+                ks.applet.verify_pin(ks._last_pin or "1234")
+                ks.connected = True
+                ks._pin_unlocked = True
+            self._respond("OK:CARD_RESET")
+        except Exception as e:
+            log_exception("HIL", e)
+            self._respond("ERR:CARD_RESET_FAIL:%s" % str(e))

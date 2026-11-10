@@ -64,6 +64,31 @@ def setup_native_stubs():
         pyb.UART = lambda *args, **kwargs: None
         pyb.USB_VCP = lambda *args, **kwargs: None
 
+    if not hasattr(pyb, "Pin"):
+        pyb.Pin = lambda *args, **kwargs: None
+        pyb.Pin.cpu = types.SimpleNamespace(
+            A2=None, A4=None, G10=None, C2=None, C5=None
+        )
+
+    uscard = _ensure_module("uscard")
+    if not hasattr(uscard, "Reader"):
+        class SmartcardException(Exception):
+            pass
+
+        class _DummyConnection:
+            pass
+
+        class _DummyReader:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def createConnection(self):
+                return _DummyConnection()
+
+        uscard.Reader = _DummyReader
+        uscard.SmartcardException = SmartcardException
+        uscard.SmartcardConnection = _DummyConnection
+
     lvgl = _ensure_module("lvgl")
     if not hasattr(lvgl, "SYMBOL"):
         class _Symbol:
@@ -105,7 +130,9 @@ def setup_native_stubs():
         "DevSettings",
     ]:
         if not hasattr(screens, _name):
-            setattr(screens, _name, type(_name, (), {}))
+            setattr(screens, _name, type(_name, (), {
+                "__init__": lambda self, *args, **kwargs: None,
+            }))
 
     _ensure_submodule("gui.screens", "mnemonic", {
         "ExportMnemonicScreen": type("ExportMnemonicScreen", (), {}),

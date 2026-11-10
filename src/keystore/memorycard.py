@@ -60,6 +60,10 @@ In this mode device can only operate when the smartcard is inserted!"""
             return True
         except Exception as e:
             print(e)
+            try:
+                cls.connection.disconnect()
+            except Exception:
+                pass
             return False
 
 
