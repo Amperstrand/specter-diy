@@ -102,31 +102,27 @@ class SatochipApplet(SecureAppletBase):
         pubkey, _ = parse_xpub_response(resp)
         return pubkey
 
-    def get_extended_key(self, path):
+    def get_extended_key(self, path, for_signing=False):
         """Get extended key (pubkey + chaincode) at derivation path (INS 0x6D).
-        
+
         Args:
             path: Derivation path as bytes (4 bytes per level, big-endian)
-                  e.g., m/44h/0h/0h = b'\x80\x00\x00\x2c\x80\x00\x00\x00\x80\x00\x00\x00'
-        
+            for_signing: If True, use P2=0x00 (full private-key derivation).
+                P2=0x40 stores a watch-only key on the card — signing with
+                keynbr=0xFF after a P2=0x40 derivation produces an
+                unverifiable signature (proven on hardware 2026-11-04).
+                Always derive with for_signing=True before sign_transaction_hash(0xFF, ...).
+
         Returns:
             tuple: (pubkey_bytes, chaincode_bytes)
-                   pubkey is 33 bytes compressed
-                   chaincode is 32 bytes
-        
-        Response format from card:
-            chaincode(32) | coordx_size(2) | coordx(32) | sign_size(2) | self-sign | auth_sign_size(2) | auth-sign
         """
-        # Use shared utility function
         from ..util import path_to_bytes
-        
+
         if isinstance(path, str):
             path = path_to_bytes(path)
-        
-        # P1 = path depth (number of derivation levels)
+
         depth = len(path) // 4
-        # P2 = option flag: 0x40 = optimization for non-hardened child derivation
-        p2 = 0x40
+        p2 = 0x00 if for_signing else 0x40
         
         apdu = bytes([self.CLA, self.INS_BIP32_GET_EXTENDED_KEY, depth, p2, len(path)]) + path
         print("[Satochip] TX (encrypted): GET_EXTENDED_KEY depth=", depth)

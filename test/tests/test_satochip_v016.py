@@ -96,6 +96,48 @@ class SatochipV016ConformanceTest(TestCase):
         self.assertLess(derive_idx, sign_idx)
         applet.sign_transaction_hash.assert_called_once_with(0xFF, bytes(32))
 
+    def test_sign_hash_uses_p2_zero_derivation(self):
+        """sign_hash must derive with P2=0x00 (full key) — P2=0x40 stores
+        watch-only on the card and signing with 0xFF produces bad sigs."""
+        from keystore.satochip import Satochip
+        conn = RecordingConnection()
+
+        def transmit(apdu):
+            conn.apdus.append(bytes(apdu))
+            if bytes(apdu)[1] == 0x6D:
+                resp = bytes(32) + (32).to_bytes(2, 'big') + bytes(32) + (0).to_bytes(2, 'big') + (0).to_bytes(2, 'big')
+                return (resp, 0x90, 0x00)
+            return (b'', 0x90, 0x00)
+
+        conn.transmit = transmit
+        applet = _applet(conn)
+        ks = Satochip.__new__(Satochip)
+        ks.applet = applet
+        ks._pin_unlocked = True
+        ks.sign_hash("m/84h/0h/0h", bytes(32))
+
+        derive_apdu = next(a for a in conn.apdus if a[1] == 0x6D)
+        self.assertEqual(derive_apdu[3], 0x00, "P2 must be 0x00 for signing path")
+
+    def test_get_extended_key_p2_flag(self):
+        """get_extended_key(for_signing=True) sends P2=0x00; default P2=0x40."""
+        conn = RecordingConnection()
+
+        def transmit(apdu):
+            conn.apdus.append(bytes(apdu))
+            if bytes(apdu)[1] == 0x6D:
+                resp = bytes(32) + (32).to_bytes(2, 'big') + bytes(32) + (0).to_bytes(2, 'big') + (0).to_bytes(2, 'big')
+                return (resp, 0x90, 0x00)
+            return (b'', 0x90, 0x00)
+
+        conn.transmit = transmit
+        applet = _applet(conn)
+        path = applet._path_to_bytes("m/44h/0h/0h")
+        applet.get_extended_key(path, for_signing=True)
+        self.assertEqual(conn.apdus[-1][3], 0x00, "P2=0x00 for signing")
+        applet.get_extended_key(path)
+        self.assertEqual(conn.apdus[-1][3], 0x40, "P2=0x40 for xpub-only")
+
 
 if __name__ == '__main__':
     import unittest

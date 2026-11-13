@@ -453,9 +453,9 @@ class Satochip(JavaCardKeyStore):
         # Convert path to bytes and set it on card
         path_bytes = self.applet._path_to_bytes(derivation)
         
-        # First, get the extended key to set the derivation path on the card
-        # The card tracks the current path for signing
-        self.applet.get_extended_key(path_bytes)
+        # Derive with P2=0x00 (full key) — P2=0x40 stores watch-only on
+        # the card and sign_transaction_hash(0xFF) produces unverifiable sigs
+        self.applet.get_extended_key(path_bytes, for_signing=True)
         
         # Now sign the hash with keynbr=0xFF (BIP32 current path)
         der_sig = self.applet.sign_transaction_hash(0xFF, msghash)
