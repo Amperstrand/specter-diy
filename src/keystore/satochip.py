@@ -123,7 +123,7 @@ class Satochip(JavaCardKeyStore):
         
         pin_attempts = None
         try:
-            resp_data, sw1, sw2 = self.applet.get_card_status()
+            resp_data = self.applet.get_card_status()
             if len(resp_data) >= 8:
                 pin_attempts = resp_data[4]
                 print('[BootTrace][Satochip] PIN attempts remaining:', pin_attempts)
@@ -142,7 +142,7 @@ class Satochip(JavaCardKeyStore):
             except PinError as e:
                 await self.show(Alert('PIN Error', str(e)))
                 try:
-                    resp_data, sw1, sw2 = self.applet.get_card_status()
+                    resp_data = self.applet.get_card_status()
                     if len(resp_data) >= 8:
                         pin_attempts = resp_data[4]
                 except:
@@ -267,7 +267,7 @@ class Satochip(JavaCardKeyStore):
             
             # Get card status for version info
             try:
-                resp_data, sw1, sw2 = self.applet.get_card_status()
+                resp_data = self.applet.get_card_status()
                 status = self.applet.parse_status(resp_data)
                 
                 if status:
