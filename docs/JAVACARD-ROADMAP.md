@@ -21,8 +21,8 @@ Framing: every deliverable is a **small, independently reviewable branch** — e
 |---|---|---|
 | `m1-t1-usart` (1 commit) | T=1 cards working with specter-diy | ✅ proven on device |
 | `m1-specter-applet` (+1 commit) | Javacard-seed keystore (MemoryCard) on J3R180 — slim client + base class + tests + docs | ✅ **M1 CLOSED** (device e2e) |
-| `m2-satochip` | Satochip cards as keystore (v0.14-0.2: select/auth/sign) | 🔨 conformance fixes in progress, hardware-verified per fix |
-| `m2-seedkeeper` | SeedKeeper secret storage (v0.2-0.1: store/retrieve/export) | 🔨 same |
+| `m2-satochip` | Satochip cards as keystore (v0.14-0.2: select/auth/sign) | ✅ all fixes landed (47/47) + P2=0x00 signing fix @ `caa0096` — review-ready |
+| `m2-seedkeeper` | SeedKeeper secret storage (v0.2-0.1: store/retrieve/export) | ✅ all fixes landed (44/44) + SETUP flow @ `1f6cb9a` — review-ready |
 | `feature/hil` | Automated on-device testing: TestMode console, JSON events, framebuffer screenshots | ✅ working (produced the M1 evidence) |
 | `feature/no-qspi-safemode` | Booting on boards with dead/missing external QSPI flash | paused, documented |
 | `feature/cap-installer` | Installing/uninstalling CAP files from within the firmware | not started (kept separate) |
