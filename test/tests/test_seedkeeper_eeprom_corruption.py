@@ -149,3 +149,73 @@ class EEPROMCorruptionTest(TestCase):
 if __name__ == '__main__':
     import unittest
     unittest.main()
+
+
+class SeedKeeperSetupTest(TestCase):
+    """SeedKeeper SETUP flow (INS 0x2A, 9C04 resolution)."""
+
+    def test_is_setup_true_on_success(self):
+        from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+
+        class MockConn:
+            def transmit(self, apdu):
+                return (b'\x00' * 10, 0x90, 0x00)
+
+        applet = SeedKeeperApplet.__new__(SeedKeeperApplet)
+        applet.sc = type('MockSC', (), {
+            'is_initialized': True,
+            'encrypt_apdu': lambda self, inner: bytes(inner),
+            'decrypt_response': staticmethod(lambda r: bytes(r)),
+        })()
+        applet.CLA = 0xB0
+        applet.conn = MockConn()
+        self.assertTrue(applet.is_setup())
+
+    def test_is_setup_false_on_9c04(self):
+        from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+        from keystore.javacard.applets.applet import ISOException
+
+        class MockConn:
+            def transmit(self, apdu):
+                return (b'', 0x9c, 0x04)
+
+        applet = SeedKeeperApplet.__new__(SeedKeeperApplet)
+        applet.sc = type('MockSC', (), {
+            'is_initialized': True,
+            'encrypt_apdu': lambda self, inner: bytes(inner),
+        })()
+        applet.CLA = 0xB0
+        applet.conn = MockConn()
+        self.assertFalse(applet.is_setup())
+
+    def test_setup_apdu_shape(self):
+        from keystore.javacard.applets.seedkeeper_applet import SeedKeeperApplet
+
+        class RecordingConn:
+            def __init__(self):
+                self.apdus = []
+            def transmit(self, apdu):
+                self.apdus.append(bytes(apdu))
+                return (b'', 0x90, 0x00)
+
+        conn = RecordingConn()
+        applet = SeedKeeperApplet.__new__(SeedKeeperApplet)
+        applet.sc = type('MockSC', (), {
+            'is_initialized': True,
+            'encrypt_apdu': lambda self, inner: bytes(inner),
+            'decrypt_response': staticmethod(lambda r: bytes(r)),
+        })()
+        applet.CLA = 0xB0
+        applet.conn = conn
+
+        applet.setup("1234", "12345678")
+
+        apdu = conn.apdus[-1]
+        self.assertEqual(apdu[1], 0x2A, "INS_SETUP")
+        self.assertEqual(apdu[2], 0x00)
+        self.assertEqual(apdu[3], 0x00)
+
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()

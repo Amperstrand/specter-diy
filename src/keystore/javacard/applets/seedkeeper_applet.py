@@ -80,11 +80,43 @@ class SeedKeeperApplet(SecureAppletBase):
     SECRET_TYPE_BIP39_V2 = 0x31        # BIP39 entropy bytes (v2 format)
     SECRET_TYPE_ELECTRUM = 0x40        # Electrum mnemonic (not supported)
     SECRET_TYPE_DESCRIPTOR = 0xC1      # Wallet output descriptor
+    INS_DELETE_SECRET = 0xA5
+    INS_SETUP = 0x2A
+
     def __init__(self, connection):
         """Initialize with card connection."""
         super().__init__(connection, self.AID)
         print("[SeedKeeper] Applet initialized")
 
+    def is_setup(self):
+        """Check if the SeedKeeper is provisioned (setupDone=true)."""
+        try:
+            self.get_seedkeeper_status()
+            return True
+        except Exception as e:
+            if "9c04" in str(e).lower():
+                return False
+            raise
+
+    def setup(self, pin, puk, pin_tries=5, puk_tries=3):
+        """Provision the card (INS 0x2A via secure channel).
+
+        One-time: sets user PIN/PUK and marks setupDone=true, unblocking
+        all data operations. Proven on hardware 2026-11-04 (9C04 resolution).
+        """
+        if isinstance(pin, str):
+            pin = pin.encode()
+        if isinstance(puk, str):
+            puk = puk.encode()
+        dflt = b"1234"  # skipped by the v0.2 applet (not checked)
+        pin1 = b"0000"  # deprecated, ignored
+        ublk1 = b"00000000"  # deprecated, ignored
+        data = bytes([len(dflt)]) + dflt
+        data += bytes([pin_tries, puk_tries, len(pin)]) + pin + bytes([len(puk)]) + puk
+        data += bytes([pin_tries, puk_tries, len(pin1)]) + pin1 + bytes([len(ublk1)]) + ublk1
+        data += (0).to_bytes(2, 'big') + (0).to_bytes(2, 'big') + bytes([0, 0, 0])
+        apdu = bytes([self.CLA, self.INS_SETUP, 0x00, 0x00, len(data)]) + data
+        self.secure_request(apdu)
 
     def get_seedkeeper_status(self):
         """
