@@ -69,9 +69,21 @@ class TestMode:
         # P6: structured JSON-lines events on the UART channel
         self.jsonl = self.uart is not None
         # V2.2: serialize channel-touching commands (prevents concurrent
-        # writers from racing the secure channel — each race costs a session)
+        # writers from racing the secure channel — each race costs a session).
+        # The vendored f469-disco asyncio (old uasyncio v2) has NO Lock class —
+        # asyncio.Lock here killed TestMode's constructor on hardware for all
+        # of v2.2.6c-v2.2.9 (AttributeError, caught invisibly in main.py).
+        # Shim: serialize where Lock exists (sim), no-op on old asyncio.
         import asyncio as _aio
-        self._ch_lock = _aio.Lock()
+        if hasattr(_aio, 'Lock'):
+            self._ch_lock = _aio.Lock()
+        else:
+            class _NullLock:
+                async def __aenter__(self):
+                    pass
+                async def __aexit__(self, *a):
+                    pass
+            self._ch_lock = _NullLock()
         self._last_reply = None
         self._current_cmd = None
 
