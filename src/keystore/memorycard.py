@@ -46,7 +46,16 @@ In this mode device can only operate when the smartcard is inserted!"""
 
     @classmethod
     def is_available(cls):
-        if not cls.connection.isCardInserted():
+        # v2.2.11: the bench slot's presence contact is unreliable (PC2 reads
+        # low with the card seated; M1-era hardware detected fine). When the
+        # contact says absent, probe the chip directly — a forced activation
+        # answers ATR iff the chip is really there. Presence stays a fast-path
+        # only when it reads present.
+        try:
+            if not cls.connection.isCardInserted():
+                cls.connection.connect(cls.connection.T1_protocol)
+                cls.connection.disconnect()
+        except Exception:
             return False
         try:
             cls.connection.connect(cls.connection.T1_protocol)
