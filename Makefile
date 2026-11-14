@@ -5,7 +5,11 @@ USER_C_MODULES ?= ../../../usermods
 MPY_DIR ?= f469-disco/micropython
 EMBIT_INIT ?= f469-disco/libs/common/embit/src/embit/__init__.py
 ifeq ($(shell uname),Linux)
-    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch
+    # ubuntu-26.04+ toolchains (gcc-15/binutils-2.46) break the vendored
+    # x86-64 asm NLR: nlr.ret_val arrives corrupted and the exception
+    # machinery segfaults. The setjmp NLR is the portable implementation.
+    # The f469-disco pin carries the matching unix-port stack-budget bump.
+    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch -DMICROPY_NLR_SETJMP=1
 else
     MPY_CFLAGS ?=
 endif
