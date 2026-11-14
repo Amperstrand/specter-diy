@@ -139,6 +139,16 @@ class TestMode:
         import asyncio
 
         self.running = True
+        # v2.2.15: hardware watchdog — the command loop is the bench health
+        # proxy; if it stops feeding for 30s (hang, GC crawl, blocking op),
+        # the IWDG reboots the board cleanly instead of leaving a wedge.
+        # Fed every loop iteration (~100ms) and per FB-dump chunk.
+        self._wdt = None
+        try:
+            from machine import WDT
+            self._wdt = WDT(timeout=30000)
+        except Exception:
+            pass
         buffer = ""
 
         # T5: FIRST statement — UART3 write on the proven carrier, no print()
@@ -147,6 +157,8 @@ class TestMode:
             self.uart.write(b"[TestMode] ALIVE T5\r\n"); import main as _m; _m._dbg('[T] command loop RUNNING, banner written')
 
         while self.running:
+            if self._wdt is not None:
+                self._wdt.feed()
             try:
                 # Try to read from stdin using uselect (MicroPython)
                 try:
@@ -342,6 +354,8 @@ class TestMode:
         chunks = (total + chunk - 1) // chunk
         self._respond("OK:FB:%d:%d:%d" % (w, h, chunks))
         for off in range(0, total, chunk):
+            if self._wdt is not None:
+                self._wdt.feed()
             n = chunk if off + chunk <= total else total - off
             row = []
             for i in range(n):
