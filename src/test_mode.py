@@ -243,6 +243,10 @@ class TestMode:
                 await self._cmd_set_network(net)
             elif cmd == "TEST_RESET":
                 await self._cmd_reset()
+            elif cmd == "TEST_GC":
+                import gc
+                self._respond("OK:GC:free=%d:alloc=%d:frag=%d" % (
+                    gc.mem_free(), gc.mem_alloc(), 1 - (gc.mem_free() // max(1, (gc.mem_free() + gc.mem_alloc())))))
             elif cmd == "TEST_BOOT_STATE":
                 await self._cmd_boot_state()
             elif cmd == "TEST_WAIT_READY":
