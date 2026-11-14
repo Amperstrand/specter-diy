@@ -132,7 +132,7 @@ class TestMode:
         # T5: FIRST statement — UART3 write on the proven carrier, no print()
         self._hb_count = 0
         if self.uart is not None:
-            self.uart.write(b"[TestMode] ALIVE T5\r\n")
+            self.uart.write(b"[TestMode] ALIVE T5\r\n"); import main as _m; _m._dbg('[T] command loop RUNNING, banner written')
 
         while self.running:
             try:

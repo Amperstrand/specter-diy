@@ -114,16 +114,16 @@ class Specter:
 
     def start(self):
         # register battery monitor (runs every 3 seconds)
-        print("[T] start: battery cb")
+        _dbg('[T] start: battery cb')
         self.gui.set_battery_callback(get_battery_status, 3000)
         # start the GUI
-        print("[T] start: gui.start")
+        _dbg('[T] start: gui.start')
         self.gui.start()
         # register coroutines for all hosts
-        print("[T] start: hosts")
+        _dbg('[T] start: hosts')
         for host in self.hosts:
             host.start(self)
-        print("[T] start: asyncio.run(setup)")
+        _dbg('[T] start: asyncio.run(setup)')
         asyncio.run(self.setup())
 
     async def handle_exception(self, exception, next_fn):
@@ -185,18 +185,18 @@ class Specter:
         self.keystore = keystore_cls()
 
     async def setup(self):
-        print("[T] setup: entered")
+        _dbg('[T] setup: entered')
         try:
             # start TestMode before keystore selection so it's responsive
             # even while the app waits for a card
-            print("[T] setup: test_mode attr =", hasattr(self, 'test_mode') and self.test_mode is not None)
+            _dbg('[T] setup: test_mode attr = %s' % (hasattr(self, 'test_mode') and self.test_mode is not None))
             if hasattr(self, 'test_mode') and self.test_mode is not None:
                 try:
                     import asyncio
                     self._tm_task = asyncio.create_task(self.test_mode._command_loop())
-                    print("[Specter] Test mode started")
+                    _dbg('[T] test mode task created')
                 except Exception as e:
-                    print("[Specter] Failed to start test mode:", e)
+                    _dbg('[T] FAILED create task: %s' % e)
 
             # check if the user already selected the keystore class
             if self.keystore is None:
