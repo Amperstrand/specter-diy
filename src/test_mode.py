@@ -66,9 +66,21 @@ class TestMode:
                 pass
 
         # serialize channel-touching commands (concurrent writers race the
-        # secure channel — each race costs a session)
+        # secure channel — each race costs a session). The vendored f469-disco
+        # asyncio (old uasyncio v2) has NO Lock class — a bare asyncio.Lock
+        # here killed TestMode's constructor on hardware (proven root cause of
+        # the v2.2.6c-v2.2.9 console silence). Shim: serialize where Lock
+        # exists (sim), no-op async CM otherwise.
         import asyncio as _aio
-        self._ch_lock = _aio.Lock()
+        if hasattr(_aio, 'Lock'):
+            self._ch_lock = _aio.Lock()
+        else:
+            class _NullLock:
+                async def __aenter__(self):
+                    pass
+                async def __aexit__(self, *a):
+                    pass
+            self._ch_lock = _NullLock()
         self._hb_count = 0
 
         # P6: structured JSON-lines events on the UART channel
