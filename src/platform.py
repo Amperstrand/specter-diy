@@ -312,8 +312,15 @@ def delete_recursively(path, include_self=False):
     raise RuntimeError("Failed to delete folder %s" % path)
 
 
+class _NullUART:
+    def write(self, data): pass
+    def read(self, n=0): return b''
+    def any(self): return 0
+
 if not simulator:
-    stlk = pyb.UART("YB", 9600)
+    # eager pyb.UART("YB", 9600) claimed the UART3 peripheral and blocked
+    # every later UART3 object (console/HIL carrier) — hardware-proven
+    stlk = _NullUART()
 
 def enable_usb():
     pyb.usb_mode("VCP")

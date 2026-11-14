@@ -186,10 +186,18 @@ class Specter:
         while keystore_cls is None:
             # Detect card type using CardDetector
             # Get shared connection from keystore module
+            # Card-floor errors (wedged/desynced session) raise out of the
+            # detection and previously killed ALL of setup — error screen,
+            # loop teardown, silent REPL. Retry instead: the applet
+            # self-heals on a fresh session (proven on hardware 2026-11-14).
             from keystore.javacard.util import get_connection
             connection = get_connection()
             detector = CardDetector(connection)
-            card_type = detector.detect_card_type()
+            try:
+                card_type = detector.detect_card_type()
+            except Exception:
+                await asyncio.sleep_ms(200)
+                continue
             
             if card_type is None:
                 # No card inserted - wait and retry
@@ -232,7 +240,9 @@ class Specter:
             if hasattr(self, 'test_mode') and self.test_mode is not None:
                 try:
                     import asyncio
-                    asyncio.create_task(self.test_mode._command_loop())
+                    # anchor the task: MicroPython GC reaps create_task
+                    # returns that nothing holds (proven on hardware)
+                    self._tm_task = asyncio.create_task(self.test_mode._command_loop())
                     print("[Specter] Test mode started")
                 except Exception as e:
                     print("[Specter] Failed to start test mode:", e)

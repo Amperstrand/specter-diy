@@ -5,10 +5,6 @@ from gui.specter import SpecterGUI
 from keystore.core import KeyStore
 from keystore.sdcard import SDKeyStore
 from keystore.memorycard import MemoryCard
-from keystore.seedkeeper import SeedKeeper
-
-from keystore.satochip import Satochip
-
 
 from hosts import SDHost, QRHost, USBHost, Host
 import platform
@@ -62,10 +58,9 @@ def main(apps=None, network="main", keystore_cls=None):
     else:
         keystores = [
             MemoryCard,
-            SeedKeeper,
-            Satochip,
             SDKeyStore,
         ]
+
     # loading apps
     if apps is None:
         apps = load_apps()
@@ -80,14 +75,20 @@ def main(apps=None, network="main", keystore_cls=None):
         settings_path=settings_path,
         network=network,
     )
-    # Start test mode for automated testing
+    # HIL test mode (flag gate: simulator default on, production hardware
+    # off - config.py overrides; see docs/hil-architecture.md section 9)
     try:
-        from test_mode import TestMode
-        test_mode = TestMode(specter)  # Pass specter instance
-        # We'll start test mode after specter starts the event loop
-        specter.test_mode = test_mode
-    except Exception as e:
-        print("[Main] Test mode not available:", e)
+        import config
+    except ImportError:
+        import config_default as config
+    if getattr(config, "hil_enabled", False):
+        try:
+            from test_mode import TestMode
+            specter.test_mode = TestMode(specter)
+        except Exception as e:
+            print("[Main] Test mode not available:", e)
+            specter.test_mode = None
+    else:
         specter.test_mode = None
     specter.start()
 

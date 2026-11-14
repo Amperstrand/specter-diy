@@ -1,0 +1,65 @@
+name: HIL (self-hosted F469 bench)
+
+# P6: hardware-in-the-loop on the ai-legion bench seat.
+# The runner acquires the labgrid place 'f469-specter-film' (exclusivity mutex
+# with the board's ccid-firmware-rs role) and RESTORES ccid-firmware-rs
+# before releasing - see test/integration/hil_runner.py.
+#
+# Runner requirements (self-hosted, label 'hil-f469'):
+#   - labgrid client, openocd, pyserial, pytest
+#   - network access to the labgrid coordinator (192.168.13.208:20408)
+#   - HIL_FW + HIL_RESTORE_FW staged or built per run
+# Card swaps are manual: nightly runs the single-card M1 flow only.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"          # nightly 03:00 Europe/Oslo
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "Test modules (space-separated paths)"
+        default: "test/integration/tests/test_basic.py"
+  pull_request:
+    branches: [master]
+    types: [labeled]
+
+jobs:
+  hil:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'hil-run')
+    runs-on: [self-hosted, hil-f469]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build HIL firmware (hil_enabled=True baked in)
+        run: |
+          printf 'hil_enabled = True\n' > src/config.py
+          make all
+
+      - name: Stage restore image (ccid-firmware-rs)
+        run: |
+          test -n "${HIL_RESTORE_FW}" && test -f "${HIL_RESTORE_FW}" \
+            || { echo "HIL_RESTORE_FW not staged on runner"; exit 1; }
+
+      - name: Run HIL session (acquire -> flash -> test -> restore -> release)
+        env:
+          LG_COORDINATOR: "192.168.13.208:20408"
+          HIL_RESTORE_FW: ${{ secrets.HIL_RESTORE_FW_PATH }}
+        run: |
+          python3 test/integration/hil_runner.py \
+            --fw build/f469/firmware.bin \
+            --restore-fw "${HIL_RESTORE_FW}" \
+            --tests ${{ github.event.inputs.tests || 'test/integration/tests/test_basic.py' }}
+
+      - name: Upload HIL artifacts (JTL results + PNG dumps)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-results-${{ github.run_id }}
+          path: artifacts/hil/
+          if-no-files-found: warn
