@@ -5,11 +5,7 @@ USER_C_MODULES ?= ../../../usermods
 MPY_DIR ?= f469-disco/micropython
 EMBIT_INIT ?= f469-disco/libs/common/embit/src/embit/__init__.py
 ifeq ($(shell uname),Linux)
-    # ubuntu-26.04+ toolchains (gcc-15/binutils-2.46) break the vendored
-    # x86-64 asm NLR: nlr.ret_val arrives corrupted and the exception
-    # machinery segfaults. The setjmp NLR is the portable implementation.
-    # The f469-disco pin carries the matching unix-port stack-budget bump.
-    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch -DMICROPY_NLR_SETJMP=1
+    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch
 else
     MPY_CFLAGS ?=
 endif
@@ -79,12 +75,19 @@ debug: $(TARGET_DIR) mpy-cross $(MPY_DIR)/ports/stm32 git-info
 
 
 # unixport (simulator)
+# MPY_UNIX_NLR: ubuntu-26.04+ toolchains (gcc-15/binutils-2.46) corrupt the
+# vendored x86-64 asm NLR (garbage nlr.ret_val -> segfaults in the exception
+# machinery); the portable setjmp NLR fixes it. Unix-only: the define must
+# NOT reach mpy-cross or the bare-metal firmware build (no libc setjmp).
+# The f469-disco pin carries the matching unix-port stack-budget bump.
+MPY_UNIX_NLR = -DMICROPY_NLR_SETJMP=1
+
 unix: $(TARGET_DIR) mpy-cross $(MPY_DIR)/ports/unix git-info
 	@echo Building binary with frozen files
 	make -C $(MPY_DIR)/ports/unix \
         USER_C_MODULES=$(USER_C_MODULES) \
         FROZEN_MANIFEST=$(FROZEN_MANIFEST_UNIX) \
-        CFLAGS_EXTRA="$(MPY_CFLAGS)" && \
+        CFLAGS_EXTRA="$(MPY_CFLAGS) $(MPY_UNIX_NLR)" && \
 	cp $(MPY_DIR)/ports/unix/micropython $(TARGET_DIR)/micropython_unix
 
 simulate: unix
