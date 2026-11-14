@@ -114,12 +114,16 @@ class Specter:
 
     def start(self):
         # register battery monitor (runs every 3 seconds)
+        print("[T] start: battery cb")
         self.gui.set_battery_callback(get_battery_status, 3000)
         # start the GUI
+        print("[T] start: gui.start")
         self.gui.start()
         # register coroutines for all hosts
+        print("[T] start: hosts")
         for host in self.hosts:
             host.start(self)
+        print("[T] start: asyncio.run(setup)")
         asyncio.run(self.setup())
 
     async def handle_exception(self, exception, next_fn):
@@ -181,9 +185,11 @@ class Specter:
         self.keystore = keystore_cls()
 
     async def setup(self):
+        print("[T] setup: entered")
         try:
             # start TestMode before keystore selection so it's responsive
             # even while the app waits for a card
+            print("[T] setup: test_mode attr =", hasattr(self, 'test_mode') and self.test_mode is not None)
             if hasattr(self, 'test_mode') and self.test_mode is not None:
                 try:
                     import asyncio
