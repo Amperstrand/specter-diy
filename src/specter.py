@@ -163,9 +163,17 @@ class Specter:
         # TODO: show some screen here if none are available
         while keystore_cls is None:
             for keystore in self.keystores:
-                if keystore.is_available():
-                    keystore_cls = keystore
-                    break
+                # v2.2.8: card-floor errors (wedged/desynced session) raise
+                # out of is_available and previously killed ALL of setup —
+                # error screen, loop teardown, silent REPL. Retry instead:
+                # the applet self-heals on a fresh session (closeChannel
+                # randomizes keys only; openChannel has no prior-state gate).
+                try:
+                    if keystore.is_available():
+                        keystore_cls = keystore
+                        break
+                except Exception:
+                    pass
             # v2.2.2: yield so cooperative scheduler can run TestMode
             # (uncommented from upstream TODO — tight loop starved the event loop)
             if keystore_cls is None:
