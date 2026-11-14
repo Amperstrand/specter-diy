@@ -109,7 +109,15 @@ def main(apps=None, network="main", keystore_cls=None):
     else:
         specter.test_mode = None
     _dbg('starting specter...')
-    specter.start()
+    _dbg('calling specter.start()')
+    try:
+        specter.start()
+        _dbg('start() RETURNED (unexpected)')
+    except BaseException as e:
+        import uio, sys
+        buf = uio.StringIO()
+        sys.print_exception(e, buf)
+        _dbg('start() THREW: ' + buf.getvalue()[:400])
 
 
 if __name__ == "__main__":
