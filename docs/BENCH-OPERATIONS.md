@@ -55,3 +55,15 @@ J3R180 #2 (CPLC 50942720) in the F469 slot; card PIN 1234 (TEST_PIN answers
 6984 at the applet level — benign, unlock still succeeds). CardMan 3121 on
 pcscd = cardbench's seat (coordinate). J3H145 = locked, never auth it.
 SWD card cold-reset: PC5 BSRR toggle (0x20 off / 0x200000 on, ~2 s apart).
+
+## Framebuffer capture (working recipe, 2026-11-14)
+
+TEST_FB_DUMP (v2.2.14+) reads the LIVE buffer from LTDC L1CFBAR (0xC0000000
+on this board) as ARGB8888 via mem32. **The memory layout is 480x800
+PORTRAIT** (L1CFBLR: line length 1920 = 480px*4, L1CFBLNR: 800 lines) —
+assemble 480-wide then rotate -90 for the on-screen landscape view. Pixels
+may print signed ('%08x' of negatives) — parse 8-char tokens, mask
+&0xFFFFFFFF. Events split across console-log lines (1024-byte reads) —
+reconstruct the byte stream before parsing. Assembler:
+evidence/2026-11-14/fb-assemble.py. Stray chunk losses happen if other
+commands race the dump — send NOTHING else during a dump.
