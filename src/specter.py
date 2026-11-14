@@ -33,6 +33,16 @@ class SpecterError(BaseError):
     NAME = "Specter error"
 
 
+def _dbg(msg):
+    # direct UART3 write (same channel as main.py's _dbg); plain print()
+    # targets the unbridged USB CDC and is invisible on the bench console
+    try:
+        import pyb
+        pyb.UART(3, 115200).write(("[SP] " + msg + "\r\n").encode())
+    except Exception:
+        pass
+
+
 class Specter:
     """Specter class.
     Call .start() method to register in the event loop
