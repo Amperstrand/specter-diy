@@ -39,7 +39,7 @@ Framing: every deliverable is a **small, independently reviewable branch** — e
 1. Land the four client conformance fixes with hardware verification → m2 branches green.
 2. Unified suite green across device + CardMan + simulator for all three applet families.
 3. Playground scenarios + GIF evidence for each user story.
-4. Refresh f469-disco #41 and prepare specter-diy minimal-branch PRs (each branch = one reviewable feature).
+4. ~~Refresh f469-disco #41 and prepare specter-diy minimal-branch PRs~~ **DOGFOOD-ONLY (owner 2026-11-14): no upstream filing — T=1 #40/#41, HIL #347, and the micropython fork patches all stay local as bench infrastructure; revisit after the M2 gate closes.**
 
 ## Testing roadmap (layers, each milestone gates through all applicable)
 1. Simulator unit (run_sim.py + simulator.jar, CI-gated per PR)
