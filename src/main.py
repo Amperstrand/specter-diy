@@ -104,7 +104,10 @@ def main(apps=None, network="main", keystore_cls=None):
             _dbg('TestMode created')
             specter.test_mode = TestMode(specter)
         except Exception as e:
-            print("[Main] Test mode not available:", e)
+            import uio, sys
+            buf = uio.StringIO()
+            sys.print_exception(e, buf)
+            _dbg('TestMode ctor THREW: ' + buf.getvalue()[:400])
             specter.test_mode = None
     else:
         specter.test_mode = None
