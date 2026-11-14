@@ -305,11 +305,14 @@ class TestMode:
         self._card_present = present
 
     async def _cmd_fb_dump(self):
-        """Dump the display framebuffer as chunked RGB565 hex events.
+        """Dump the display framebuffer as chunked ARGB8888 hex events.
 
         Emits OK:FB:width:height:chunks first, then one 'fb' JSON event per
-        chunk (512 pixels = 1024 hex chars each). Host reassembles to PNG.
-        Hardware only - the simulator has no LTDC framebuffer.
+        chunk (256 pixels = 2048 chars each). Hardware only. Address and
+        format come from the LTDC layer registers at runtime — L1CFBAR holds
+        the live buffer (0xC0000000 on the bench board; L1PFCR=0 => ARGB8888,
+        4 bytes/pixel). The original RGB565/fixed-address assumptions were
+        wrong on real hardware (garbage dumps, proven 2026-11-14).
         """
         if platform.simulator:
             self._respond("ERROR:No framebuffer in simulator")
@@ -318,20 +321,22 @@ class TestMode:
             import config
         except ImportError:
             import config_default as config
-        from machine import mem16
-        base = getattr(config, "fb_base_address", 0xD0000000)
+        from machine import mem32
+        base = getattr(config, "fb_base_address", None)
+        if base is None:
+            base = mem32[0x400168AC]  # LTDC L1CFBAR
         w = getattr(config, "fb_width", 800)
         h = getattr(config, "fb_height", 480)
         total = w * h
-        chunk = 512
+        chunk = 256
         chunks = (total + chunk - 1) // chunk
         self._respond("OK:FB:%d:%d:%d" % (w, h, chunks))
         for off in range(0, total, chunk):
             n = chunk if off + chunk <= total else total - off
             row = []
             for i in range(n):
-                row.append("%04x" % mem16(base + (off + i) * 2))
-            self._event("fb", seq=off // chunk, rgb565="".join(row))
+                row.append("%08x" % (mem32[base + (off + i) * 4] & 0xFFFFFFFF))
+            self._event("fb", seq=off // chunk, argb="".join(row))
 
     async def _cmd_wipe_secrets(self):
         """Delete all card secrets (issue #22 HIL flow).
