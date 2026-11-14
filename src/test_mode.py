@@ -340,7 +340,7 @@ class TestMode:
             n = chunk if off + chunk <= total else total - off
             row = []
             for i in range(n):
-                row.append("%04x" % mem16(base + (off + i) * 2))
+                row.append("%04x" % mem16[base + (off + i) * 2])
             self._event("fb", seq=off // chunk, rgb565="".join(row))
 
     async def _cmd_echo(self):
