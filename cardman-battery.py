@@ -221,16 +221,24 @@ from smartcard.CardConnection import CardConnection  # noqa: E402
 
 
 class PyscardConnection:
-    """Adapter: the m2 client's connection interface over pyscard."""
+    """Adapter: the m2 client's connection interface over pyscard.
 
-    def __init__(self):
+    Reader selection: CARDMAN_BATTERY_READER env (substring match against
+    the pcscd reader list; default "CardMan" = the physical seat). The
+    version farm's vpcd readers ("jCardSim VPCD 00 01" etc.) run the SAME
+    battery against simulator-served applet builds.
+    """
+
+    def __init__(self, reader_substr=None):
+        substr = reader_substr or os.environ.get(
+            "CARDMAN_BATTERY_READER", "CardMan")
         for r in readers():
-            if "CardMan" in str(r):
+            if substr in str(r):
                 self.conn = r.createConnection()
                 self.conn.connect()
                 self.T1_protocol = 1
                 return
-        raise RuntimeError("CardMan reader not found")
+        raise RuntimeError("reader matching %r not found" % substr)
 
     def isCardInserted(self):
         return True
