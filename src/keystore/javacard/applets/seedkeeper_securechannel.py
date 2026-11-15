@@ -18,31 +18,43 @@ IV_SIZE = 16
 MAC_SIZE = 20
 AES_CBC = 2
 
-def recover_pubkey_from_sig(coordx, sig_der):
+def recover_pubkey_from_sig(coordx, sig_der, msg_prefix=b''):
     """Recover the full compressed pubkey from an x-only coord + self-signature.
 
-    Returns None if recovery fails (caller should try both parities).
+    Signed message framing differs by INS (source-read from the v0.14-0.2
+    applet, 2026-11-15): INS 0x81 (secure channel) and INS 0x73
+    (authentikey) sign sha256(0x0020 || coordx); INS 0x6D (extended key)
+    signs sha256(chaincode || 0x0020 || coordx) — pass the 32-byte
+    chaincode as msg_prefix there. The earlier "responses have no
+    self-signature / fallback to even-Y" note was a misdiagnosis of this
+    framing difference (proven by exact recovery in the Rust client).
+
+    Returns None if recovery fails (caller falls back to even-Y).
     """
     import hashlib
-    msg = (len(coordx)).to_bytes(2, 'big') + bytes(coordx)
+    msg = bytes(msg_prefix) + (len(coordx)).to_bytes(2, 'big') + bytes(coordx)
     h = hashlib.sha256(msg).digest()
     try:
         sig = secp256k1.ecdsa_signature_parse_der(bytes(sig_der))
-        for prefix in (b'\x02', b'\x03'):
+    except Exception:
+        return None
+    for prefix in (b'\x02', b'\x03'):
+        try:
             pub_parsed = secp256k1.ec_pubkey_parse(prefix + bytes(coordx))
             pub_ser = secp256k1.ec_pubkey_serialize(pub_parsed, secp256k1.EC_UNCOMPRESSED)
-            pub64 = pub_ser[1:]
-            if secp256k1.ecdsa_verify(sig, h, pub64):
+            if secp256k1.ecdsa_verify(sig, h, pub_ser[1:]):
                 return prefix + bytes(coordx)
-    except Exception:
-        pass
+        except Exception:
+            # wrong-parity candidate raises BadSignatureError — keep trying
+            continue
     return None
 
 
-def parse_xpub_response(resp):
+def parse_xpub_response(resp, msg_prefix=b''):
     """Parse a coordx response, recovering the full pubkey when a sig is present.
 
-    v0.14 INS 0x6D responses have NO self-signature — fallback to even-Y.
+    msg_prefix: INS 0x6D self-sigs cover sha256(chaincode || 0x0020 ||
+    coordx) — pass the 32-byte chaincode there; no prefix for 0x81/0x73.
     Format WITH sig: [coordx_size(2) | coordx(N) | sig_size(2) | sig(N)]
     Format WITHOUT sig: [coordx_size(2) | coordx(N)]
     Returns: (compressed_pubkey_33B, remaining_bytes)
@@ -58,7 +70,7 @@ def parse_xpub_response(resp):
         sig_size = (resp[sig_off] << 8) | resp[sig_off + 1]
         if sig_size > 0 and len(resp) >= sig_off + 2 + sig_size:
             sig = bytes(resp[sig_off + 2:sig_off + 2 + sig_size])
-            pub = recover_pubkey_from_sig(coordx, sig)
+            pub = recover_pubkey_from_sig(coordx, sig, msg_prefix)
             if pub is not None:
                 return pub, resp[sig_off + 2 + sig_size:]
     # fallback: no sig (v0.14 0x6D) or recovery failed — use even-Y

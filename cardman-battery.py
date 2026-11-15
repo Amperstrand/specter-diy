@@ -145,12 +145,14 @@ def _sig_parse(der):
 
 
 def _verify(sig_rs, digest, vk):
-    from ecdsa.util import sigencode_string
     if isinstance(sig_rs, tuple):
-        raw = sigencode_string(sig_rs[0], sig_rs[1], _ecdsa.SECP256k1.order)
+        raw = (sig_rs[0].to_bytes(32, "big") + sig_rs[1].to_bytes(32, "big"))
     else:
         raw = bytes(sig_rs)
-    return vk.verify_digest(_ecdsa.ecdsa.Signature.from_bytes(raw), bytes(digest))
+    # verify_digest takes RAW r||s bytes in this python-ecdsa; the old
+    # Signature.from_bytes call (a Rust API) raised AttributeError,
+    # silently swallowed by recover()'s except — defeating pubkey recovery
+    return vk.verify_digest(raw, bytes(digest))
 
 
 _ec.ec_pubkey_create = lambda secret: _ecdsa.SigningKey.from_string(bytes(secret)[:32], curve=_ecdsa.SECP256k1).get_verifying_key()
@@ -296,11 +298,10 @@ def main(sign_count=25):
     print("master pubkey:", pub0.hex()[:24], "…")
 
     # signing battery: derive full keys (P2=0x00) + sign + verify host-side.
-    # Pubkey parity: the coordx response may lack the self-signature
-    # (no-cache 0x80 derivations) — the signature itself pins the parity,
-    # so verify against both and count a match on either.
-    def _vk_for(prefix, pub33):
-        x, y = _decompress(prefix + bytes(pub33)[1:])
+    # Pubkey parity is now EXACT (0x6D self-sig recovery with the
+    # chaincode-prefixed message) — single verify, no both-parity probing.
+    def _vk(pub33):
+        x, y = _decompress(bytes(pub33))
         return _ecdsa.VerifyingKey.from_string(
             x.to_bytes(32, "big") + y.to_bytes(32, "big"),
             curve=_ecdsa.SECP256k1)
@@ -316,17 +317,9 @@ def main(sign_count=25):
             r, s = _sig_parse(sig)
             if (r, s) != (min(r, _ecdsa.SECP256k1.order - r),
                           min(s, _ecdsa.SECP256k1.order - s)):
-                print(f"  HIGH-S at {path}")
-            raw_sig = r.to_bytes(32, "big") + s.to_bytes(32, "big")
-            verified = False
-            for prefix in (b"\x02", b"\x03"):
-                try:
-                    if _vk_for(prefix, pub).verify_digest(raw_sig, digest):
-                        verified = True
-                        break
-                except _ecdsa.BadSignatureError:
-                    continue
-            if verified:
+                print(f"  HIGH-S at {path} (card does not enforce low-S)")
+            if _vk(pub).verify_digest(
+                    r.to_bytes(32, "big") + s.to_bytes(32, "big"), digest):
                 ok += 1
             else:
                 fail += 1

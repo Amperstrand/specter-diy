@@ -184,9 +184,10 @@ class SatochipApplet(SecureAppletBase):
             raise AppletException("Invalid extended key response: %d bytes" % len(resp))
 
         chaincode = bytes(resp[0:32])
-        # fp#3: recover pubkey from self-sig (not blind 0x02 prefix)
+        # fp#3: recover pubkey from self-sig (not blind 0x02 prefix);
+        # the 0x6D self-sig covers chaincode || 0x0020 || coordx
         from .seedkeeper_securechannel import parse_xpub_response
-        pubkey, _ = parse_xpub_response(resp[32:])
+        pubkey, _ = parse_xpub_response(resp[32:], msg_prefix=chaincode)
 
         print("[Satochip] Chaincode:", hexlify(chaincode))
         print("[Satochip] Pubkey (recovered):", hexlify(pubkey))
