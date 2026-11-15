@@ -1,0 +1,5 @@
+03:10:50 === campaign v2 armed 20261115-031050, TTL 7h, 3 fault classes, instrumented ===
+03:11:15 injection[vcc] firing
+03:12:32 injection[vcc]: RECOVERED
+03:12:40 screen-diff: changed=True bbox=(0, 0, 160, 120)
+03:14:07 RECOVERY: step 0 daemon restart
