@@ -279,7 +279,9 @@ class TestMode:
             elif cmd == "TEST_FULL_CHECK":
                 await self._cmd_full_check()
             elif cmd == "TEST_FB_DUMP" or cmd.startswith("TEST_FB_DUMP:"):
-                rargs = [int(a) if a.isdigit() else None for a in cmd.split(":")[1:]]
+                raw = cmd[len("TEST_FB_DUMP"):].lstrip(":")
+                rargs = [int(a) if a.strip().isdigit() else None
+                         for a in raw.split(",")] if raw else []
                 while len(rargs) < 4:
                     rargs.append(None)
                 await self._cmd_fb_dump(*rargs)
