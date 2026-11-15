@@ -27,7 +27,7 @@ def _verify(pubkey, sig, msg):
     return pubkey.verify(sig, msg)
 
 
-@pytest.mark.needs("card")
+@pytest.mark.needs_any("card-real", "card-mock")
 class TestSignBattery:
     """Every signature verified against its pubkey; failure count must be 0."""
 

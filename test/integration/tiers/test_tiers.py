@@ -20,7 +20,7 @@ class TestBenchStatus:
         assert st["keystore_found"] is True
 
 
-@pytest.mark.needs("card")
+@pytest.mark.needs_any("card-real", "card-mock")
 class TestPinFlow:
     def test_pin_flow_unlocks(self, backend):
         r = backend.pin("1234")
@@ -29,7 +29,7 @@ class TestPinFlow:
         assert st["unlocked"] is True
 
 
-@pytest.mark.needs("card")
+@pytest.mark.needs_any("card-real", "card-mock")
 class TestSignShape:
     """Signature-shape battery — the endurance core. The dry tier replays
     recorded shapes; the device tier needs the TEST_SIGN firmware command

@@ -47,7 +47,7 @@ class DryBench:
     """Transcript-driven: deterministic, zero hardware, milliseconds."""
 
     name = "dry"
-    provides = {"logic", "card"}
+    provides = {"logic", "card-mock"}
 
     STATUS = ("OK:{'keystore_type': 'Smartcard', 'connected': True, "
               "'keystore_found': True, 'unlocked': False, "
@@ -55,7 +55,7 @@ class DryBench:
 
     def status(self):
         return {"connected": True, "keystore_found": True, "unlocked": False,
-                "card_inserted": True}
+                "card_inserted": True, "fingerprint": None}
 
     def pin(self, pin):
         return "ERROR:6984"  # recorded: applet-level reply, unlock succeeds
@@ -73,22 +73,43 @@ class DeviceBench:
     """Full integration: console daemon FIFO -> TestMode on the F469."""
 
     name = "device"
-    provides = {"logic", "card", "firmware", "gui", "screen"}
+    provides = {"logic", "card-real", "firmware", "gui", "screen"}
 
     def __init__(self):
+        if sh("pgrep -f overnight-campaign2.py").strip():
+            import pytest
+            pytest.skip("device tier blocked: campaign owns the console "
+                        "(arbitration rule — see README)")
         self._lease()
 
     def _lease(self):
         out = sh(f"labgrid-client -x {COORDINATOR} -p {DEVICE_PLACE} acquire")
-        self._leased = "acquired" in out or "already" in out.lower()
+        # fail-closed: an unverified lease can yield WRONG GREENS on shared hardware
+        import pytest
+        if "acquired place" not in out:
+            pytest.fail(f"labgrid lease NOT acquired (fail-closed): {out.strip()[:120]}")
+        self._leased = True
 
     def release(self):
         if getattr(self, "_leased", False):
             sh(f"labgrid-client -x {COORDINATOR} -p {DEVICE_PLACE} release")
 
     def _cmd(self, cmd, name, wait_s=16):
+        try:
+            off = os.path.getsize(CONSOLE_LOG)
+        except OSError:
+            off = 0
         console_send(cmd)
-        return console_reply(name, wait_s)
+        time.sleep(wait_s)
+        with open(CONSOLE_LOG, "rb") as f:
+            f.seek(off)
+            fresh = f.read().decode("utf-8", "replace").replace(chr(92), "")
+        lines = [l for l in fresh.splitlines() if "CMD: " + name in l]
+        if not lines:
+            return ""
+        # reply follows the CMD line in the same stream
+        idx = fresh.find(lines[-1])
+        return fresh[idx:idx + 400]
 
     def status(self):
         out = self._cmd("TEST_STATUS", "TEST_STATUS")
@@ -111,7 +132,7 @@ class CardManBench:
     """Real card in the CardMan reader, host-side client (dry-friendly)."""
 
     name = "cardman"
-    provides = {"logic", "card"}
+    provides = {"logic", "card-real"}
 
     def __init__(self):
         raise pytest.skip("CardMan tier pending cardbench bless "
@@ -166,7 +187,8 @@ def backend(request):
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "needs(*args): capabilities the test requires")
+    config.addinivalue_line("markers", "needs(*args): capabilities the test requires (all)")
+    config.addinivalue_line("markers", "needs_any(*args): at least one capability required")
 
 
 @pytest.fixture(autouse=True)
@@ -177,3 +199,6 @@ def _needs(request, backend):
     for cap in marker.args:
         if cap not in backend.provides:
             pytest.skip(f"backend {backend.name} does not provide '{cap}'")
+    any_marker = request.node.get_closest_marker("needs_any")
+    if any_marker and not any(c in backend.provides for c in any_marker.args):
+        pytest.skip(f"backend {backend.name} provides none of {any_marker.args}")

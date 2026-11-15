@@ -36,3 +36,11 @@ labgrid lease (place acquire/release = the exclusivity mutex).
 - The device tier never opens the serial port directly — only the daemon
   FIFO (single-owner rule).
 - Every tier produces the same result dict shape; reports compare tiers.
+
+## Arbitration rule (learned live 2026-11-15)
+
+The device backend shares the console FIFO with the campaign harness — the two
+MUST NOT run concurrently (interleaved replies corrupt both). The campaign
+doesn't take the labgrid lease, so the lease alone is not the mutex. Until the
+daemon gains request-ids (conwrt-bench #172.2, reviewer item 6): the device
+tier skips with a clear reason while a campaign process is alive.
