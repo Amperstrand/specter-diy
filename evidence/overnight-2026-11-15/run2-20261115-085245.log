@@ -1,0 +1,62 @@
+08:52:45 === campaign v2 armed 20261115-085245, TTL 7h, 3 fault classes, instrumented ===
+08:53:10 injection[vcc] firing
+08:54:27 injection[vcc]: RECOVERED
+08:54:36 screen-diff: changed=True bbox=(0, 0, 160, 120)
+09:38:22 injection[rst] firing
+09:39:38 injection[rst]: RECOVERED
+09:54:45 screen-diff: changed=True bbox=(0, 0, 160, 120)
+10:24:57 injection[t1bad] firing
+10:26:13 injection[t1bad]: RECOVERED
+10:55:54 screen-diff: changed=True bbox=(0, 0, 160, 120)
+11:11:09 injection[vcc] firing
+11:13:11 injection[vcc]: RECOVERED
+11:14:36 RECOVERY: step 0 console daemon (systemd)
+11:15:16 recovery: daemon restart sufficient
+11:45:49 RECOVERY: step 0 console daemon (systemd)
+11:46:29 recovery: daemon restart sufficient
+11:50:44 RECOVERY: step 0 console daemon (systemd)
+11:51:24 RECOVERY: step 1 adapter usbreset
+11:51:49 RECOVERY: step 2 SWD reset run
+11:52:49 RECOVERY: step 3 reflash known-good
+11:53:25 recovery: reflash verified=True
+11:54:52 recovery: post-reflash probe ok=True
+11:56:29 injection[rst] firing
+11:58:30 injection[rst]: RECOVERED
+11:58:38 screen-diff: changed=True bbox=(0, 0, 160, 120)
+12:25:37 RECOVERY: step 0 console daemon (systemd)
+12:26:17 recovery: daemon restart sufficient
+12:37:37 RECOVERY: step 0 console daemon (systemd)
+12:38:17 recovery: daemon restart sufficient
+12:42:32 RECOVERY: step 0 console daemon (systemd)
+12:43:12 recovery: daemon restart sufficient
+12:43:12 injection[t1bad] firing
+12:44:28 injection[t1bad]: RECOVERED
+12:47:18 RECOVERY: step 0 console daemon (systemd)
+12:47:58 recovery: daemon restart sufficient
+12:58:02 screen-diff: changed=True bbox=(0, 0, 160, 120)
+13:23:21 RECOVERY: step 0 console daemon (systemd)
+13:24:01 RECOVERY: step 1 adapter usbreset
+13:24:26 recovery: usbreset sufficient
+13:28:41 injection[vcc] firing
+13:30:43 injection[vcc]: probe failed twice — --
+
+13:32:08 RECOVERY: step 0 console daemon (systemd)
+13:32:48 recovery: daemon restart sufficient
+13:42:43 RECOVERY: step 0 console daemon (systemd)
+13:43:23 RECOVERY: step 1 adapter usbreset
+13:43:48 recovery: usbreset sufficient
+13:48:03 RECOVERY: step 0 console daemon (systemd)
+13:48:43 recovery: daemon restart sufficient
+13:58:47 screen-diff: changed=True bbox=(0, 0, 160, 120)
+14:14:51 injection[rst] firing
+14:16:06 injection[rst]: RECOVERED
+14:58:38 RECOVERY: step 0 console daemon (systemd)
+14:59:18 recovery: daemon restart sufficient
+14:59:27 screen-diff: changed=True bbox=(0, 0, 160, 120)
+15:00:54 injection[t1bad] firing
+15:02:09 injection[t1bad]: RECOVERED
+15:04:59 RECOVERY: step 0 console daemon (systemd)
+15:05:39 recovery: daemon restart sufficient
+15:46:56 injection[vcc] firing
+15:48:13 injection[vcc]: RECOVERED
+15:53:52 === campaign complete — report.md written ===
