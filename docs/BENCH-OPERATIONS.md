@@ -131,3 +131,35 @@ clusters break the campaign's silence threshold, firing the recovery ladder.
 **Impact on campaign data**: 92% of port errors were this. After the fix: zero
 errors in sustained monitoring. The recovery ladder stays as insurance for real
 wedges only (vcc injection failures, firmware crashes). The WDT handles hangs.
+
+## TestMode command reference (v2.2.19+)
+
+Protocol: commands via FIFO, responses on console log as JSON events.
+
+| Command | What | Since |
+|---|---|---|
+| TEST_STATUS | keystore/card state JSON | M1 |
+| TEST_BOOT_STATE | boot state incl. secret_set | M1 |
+| TEST_PIN:<pin> | card PIN entry (6984 reply = benign) | M1 |
+| TEST_SCREEN | current screen class + title | M1 |
+| TEST_WALLET_SMOKE | wallet creation attempt | M1 |
+| TEST_FB_DUMP[:x,y,w,h] | framebuffer dump (region optional; 480-wide portrait coords) | v2.18 |
+| TEST_GC | heap free/alloc (for drift monitoring) | v2.16 |
+| TEST_SIGN:<hex> | sign a 32-byte hash at default path | #56 |
+| TEST_SIGN_AT:<path>:<hex> | sign at explicit path | #56 |
+| TEST_XPUB:<path> | get xpub at path | #56 |
+| TEST_GET_ADDRESS:<path> | get address at path | #56 |
+| TEST_SET_NETWORK:<net> | set network (main/test) | #56 |
+| TEST_UI_SET:<value> | set screen result value (menu driving) | #56 |
+| TEST_UI_PIN:<digits> | enter PIN on PinScreen | #56 |
+| TEST_FULL_CHECK | comprehensive health check | #56 |
+| TEST_CMD_ECHO | SC-path echo probe | #56 |
+| TEST_OPEN_EE | raw INS 0xB5 probe | #56 |
+| TEST_REBOOT | hard reset | v2.6 |
+| TEST_WIPE_SECRETS | wipe card secrets (#22 regression) | P6 |
+| TEST_RESET | reset card connection | M1 |
+| TEST_WAIT_READY | block until ready | M1 |
+
+Heartbeat: `[TestMode] HB` every ~10s = healthy loop.
+Boot banner: `[TestMode] ALIVE T5` right after task creation.
+Asyncio probe: `[TestMode] asyncio v(3,0,0) Lock=False` on boot (v2.17+).
