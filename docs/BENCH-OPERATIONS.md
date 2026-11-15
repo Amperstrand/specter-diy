@@ -67,3 +67,16 @@ may print signed ('%08x' of negatives) — parse 8-char tokens, mask
 reconstruct the byte stream before parsing. Assembler:
 evidence/2026-11-14/fb-assemble.py. Stray chunk losses happen if other
 commands race the dump — send NOTHING else during a dump.
+
+## The asyncio resolution — FULLY RESOLVED (2026-11-15)
+
+The vendored libs/common/asyncio (v3.0.0) exports Lock/Event via a lazy
+module `__getattr__` — a VM feature the vendored micropython (v1.10-era)
+lacks. So `asyncio.Lock` raised AttributeError on BOTH sim and device
+while `asyncio.lock.Lock` always worked: an internal version-skew bug in
+the f469-diso tree (async lib bumped, micropython not). Sim and device
+resolve asyncio IDENTICALLY — the tiers were always aligned; the Lock bug
+wasn't sim/hardware skew, it was an untested API on both.
+Fix (proven in the specter-diy-sim worktree): replace the lazy loader with
+an eager import loop — old-VM-safe, zero regressions (33+19 green).
+The TestMode Lock shim (v2.2.10) stays as belt-and-suspenders.
