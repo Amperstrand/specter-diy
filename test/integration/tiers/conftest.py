@@ -26,7 +26,9 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
+import types
 from datetime import datetime
 
 import pytest
@@ -237,6 +239,132 @@ class CardManBench:
         raise NotImplementedError
 
 
+class VpcdBench:
+    """vpcd tier (L2): jCardSim applet classes behind a pcscd vpcd reader.
+
+    Full host client stack — pyscard -> pcscd -> libifdvpcd-jcardsim.so
+    (mutex-fixed driver; see specter-javacard/tests/host/) ->
+    tests/tests/util/vicc.py -> jcsimcli -> SecureApplet — the SAME pcscd
+    API the cardman tier will use, zero physical card. The secure-channel
+    client is the ORIGINAL util/securechannel.py (proven on simulator +
+    real card).
+
+    Bench setup (fails closed with this pointer if not up):
+      1. reader slot: specter-javacard/tests/host/build_libifdvpcd_jcardsim.sh
+         build+deploy+setup, pcscd restart under the bench flock
+      2. adapter: tmux new-session -d -s jcardsim-vpcd \
+           'cd specter-javacard/tests/tests/util && python3 vicc.py'
+    Provides "card-mock" (a virtual card, not "card-real"); the sign
+    battery skips per-test until a sign-capable applet (m2 SatoChip) is
+    served here.
+    """
+
+    name = "vpcd"
+    provides = {"logic", "card", "card-mock"}
+
+    READER = os.environ.get("TIER_VPCD_READER", "jCardSim VPCD 00 00")
+    AID = os.environ.get("TIER_VPCD_AID", "B00B5111FF01")
+    JAVACARD_TESTS = os.environ.get(
+        "TIER_SPECTER_JAVACARD",
+        "/home/ubuntu/src/specter-javacard/tests/tests")
+
+    def __init__(self):
+        if self.JAVACARD_TESTS not in sys.path:
+            sys.path.insert(0, self.JAVACARD_TESTS)
+        self.conn = self._connect()
+        self._select()
+        self.sc = None
+
+    def _connect(self):
+        from smartcard.CardConnection import CardConnection
+        from smartcard.Exceptions import (CardConnectionException,
+                                          NoCardException)
+        from smartcard.System import readers
+        deadline = time.time() + 30
+        while True:
+            rs = [r for r in readers() if self.READER in str(r)]
+            if not rs:
+                pytest.fail(f"reader '{self.READER}' not in pcscd list — "
+                            "run build_libifdvpcd_jcardsim.sh setup + "
+                            "restart pcscd (tiers README §vpcd)")
+            try:
+                conn = rs[0].createConnection()
+                conn.connect(CardConnection.T1_protocol)
+                return conn
+            except (NoCardException, CardConnectionException):
+                if time.time() > deadline:
+                    pytest.fail(f"'{self.READER}' present but no card for "
+                                "30s — is the vicc.py adapter running? "
+                                "(tiers README §vpcd)")
+                time.sleep(1)
+
+    def _select(self):
+        aid = bytes.fromhex(self.AID)
+        data, sw1, sw2 = self.conn.transmit(
+            [0x00, 0xA4, 0x04, 0x00, len(aid)] + list(aid))
+        if (sw1, sw2) != (0x90, 0x00):
+            pytest.fail(f"applet SELECT {self.AID} -> {sw1:02x}{sw2:02x} — "
+                        "adapter serving a different applet?")
+
+    def _request(self, apdu):
+        from util.simulator import ISOException
+        data, sw1, sw2 = self.conn.transmit(list(apdu))
+        if (sw1, sw2) != (0x90, 0x00):
+            raise ISOException(f"{sw1:02x}{sw2:02x}")
+        return bytes(data)
+
+    def _ensure_channel(self):
+        from util.securechannel import SecureChannel
+        if self.sc is not None and self.sc.is_open:
+            return self.sc
+        for attempt in range(2):
+            try:
+                card = types.SimpleNamespace(request=self._request)
+                self.sc = SecureChannel(card)
+                self.sc.open()
+                return self.sc
+            except Exception as e:
+                if attempt == 1:
+                    pytest.fail(f"secure channel failed to open: {e!r}")
+                # session churn — re-establish transport, retry once
+                self.conn = self._connect()
+                self._select()
+        raise RuntimeError("unreachable")
+
+    def _pin_status(self):
+        sc = self._ensure_channel()
+        left, total, is_set = list(sc.request(b"\x03\x00"))
+        return left, total, is_set
+
+    def status(self):
+        _, _, is_set = self._pin_status()
+        return {"connected": True, "keystore_found": True,
+                "unlocked": is_set == 2, "card_inserted": True,
+                "fingerprint": None}
+
+    def pin(self, pin):
+        sc = self._ensure_channel()
+        pin_b = pin.encode() if isinstance(pin, str) else bytes(pin)
+        _, _, is_set = list(sc.request(b"\x03\x00"))
+        if is_set == 0:
+            sc.request(b"\x03\x04" + pin_b)      # set (unlocks)
+        elif is_set == 1:
+            sc.request(b"\x03\x01" + pin_b)      # verify (unlocks)
+        _, _, is_set = list(sc.request(b"\x03\x00"))
+        return "OK" if is_set == 2 else "ERROR:locked"
+
+    def pin_status(self):
+        return self.status()
+
+    def sign(self, message, path):
+        pytest.skip("SecureApplet has no sign INS — m2 SatoChip applet "
+                    "on the vpcd tier is the follow-up (owner priority 2/3)")
+
+    def authentikey_for(self, path):
+        raise NotImplementedError("vpcd tier: SecureApplet authentikey "
+                                  "export pending")
+
+
 class SimBench:
     """Unix-port app simulator (make test path)."""
 
@@ -264,7 +392,7 @@ class SimBench:
 def pytest_addoption(parser):
     parser.addoption("--backend",
                      default=os.environ.get("TIER_BACKEND", "dry"),
-                     choices=["dry", "sim", "cardman", "device"])
+                     choices=["dry", "sim", "cardman", "device", "vpcd"])
     parser.addoption("--sign-count", type=int, default=8)
     parser.addoption("--record", action="store_true",
                      help="capture device replies into dry-tier fixtures")
@@ -279,6 +407,8 @@ def backend(request):
         yield SimBench()
     elif tier == "cardman":
         yield CardManBench()
+    elif tier == "vpcd":
+        yield VpcdBench()
     elif tier == "device":
         b = DeviceBench()
         try:
