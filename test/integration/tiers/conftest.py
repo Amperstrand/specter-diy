@@ -38,6 +38,9 @@ CONSOLE_LOG = "/tmp/opencode/f469-console.log"
 
 LOG_LINE_RE = re.compile(r"^(\S+)\s+b('.*')\s*$")
 REPLY_WAIT_S = 30
+RECORD = False
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "device.jsonl")
+FW_SHA = "unknown"
 POLL_S = 0.5
 
 
@@ -174,6 +177,12 @@ class DeviceBench:
         if reply is None:
             pytest.fail(f"no J-result for {name} within {wait_s}s "
                         f"(sent {datetime.fromtimestamp(sent_ts).isoformat()})")
+        if RECORD:
+            os.makedirs(os.path.dirname(FIXTURES), exist_ok=True)
+            with open(FIXTURES, "a") as f:
+                f.write(json.dumps({"cmd": cmd, "reply": reply,
+                                    "t": datetime.fromtimestamp(sent_ts).isoformat(),
+                                    "fw": FW_SHA}) + "\n")
         return reply
 
     def status(self):
@@ -255,6 +264,8 @@ def pytest_addoption(parser):
                      default=os.environ.get("TIER_BACKEND", "dry"),
                      choices=["dry", "sim", "cardman", "device"])
     parser.addoption("--sign-count", type=int, default=8)
+    parser.addoption("--record", action="store_true",
+                     help="capture device replies into dry-tier fixtures")
 
 
 @pytest.fixture(scope="session")
@@ -275,6 +286,13 @@ def backend(request):
 
 
 def pytest_configure(config):
+    global RECORD, FW_SHA
+    RECORD = config.getoption("--record") if hasattr(config, "getoption") else False
+    try:
+        import hashlib
+        FW_SHA = hashlib.sha256(open("/tmp/opencode/v2218.bin", "rb").read()).hexdigest()[:12]
+    except OSError:
+        pass
     config.addinivalue_line("markers", "needs(*args): capabilities the test requires (ALL must be provided)")
     config.addinivalue_line("markers",
                             "needs_any(*args): capabilities the test requires "
