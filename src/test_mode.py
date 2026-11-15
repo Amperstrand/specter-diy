@@ -278,7 +278,11 @@ class TestMode:
                 await self._cmd_get_address(addr_arg)
             elif cmd == "TEST_FULL_CHECK":
                 await self._cmd_full_check()
-            elif cmd == "TEST_FB_DUMP":
+            elif cmd == "TEST_FB_DUMP" or cmd.startswith("TEST_FB_DUMP:"):
+                rargs = [int(a) if a.isdigit() else None for a in cmd.split(":")[1:]]
+                while len(rargs) < 4:
+                    rargs.append(None)
+                await self._cmd_fb_dump(*rargs)
                 await self._cmd_fb_dump()
             elif cmd == "TEST_WIPE_SECRETS":
                 await self._cmd_wipe_secrets()
@@ -341,7 +345,7 @@ class TestMode:
             self._event("card", present=present)
         self._card_present = present
 
-    async def _cmd_fb_dump(self):
+    async def _cmd_fb_dump(self, x=None, y=None, rw=None, rh=None):
         """Dump the display framebuffer as chunked ARGB8888 hex events.
 
         Emits OK:FB:width:height:chunks first, then one 'fb' JSON event per
@@ -364,18 +368,30 @@ class TestMode:
             base = mem32[0x400168AC]  # LTDC L1CFBAR — the live layer buffer
         w = getattr(config, "fb_width", 800)
         h = getattr(config, "fb_height", 480)
-        total = w * h
+        # region: TEST_FB_DUMP:x,y,w,h crops in memory-layout coords
+        # (480-wide portrait); yields per chunk so the loop stays alive
+        if x is not None and y is not None and rw and rh:
+            x0, y0, x1, y1 = x, y, x + rw, y + rh
+        else:
+            x0, y0, x1, y1 = 0, 0, w, h
+        out_w, out_h = x1 - x0, y1 - y0
+        total = out_w * out_h
         chunk = 256
         chunks = (total + chunk - 1) // chunk
-        self._respond("OK:FB:%d:%d:%d" % (w, h, chunks))
-        for off in range(0, total, chunk):
-            if self._wdt is not None:
-                self._wdt.feed()
-            n = chunk if off + chunk <= total else total - off
-            row = []
-            for i in range(n):
-                row.append("%08x" % mem32[base + (off + i) * 4])
-            self._event("fb", seq=off // chunk, argb="".join(row))
+        self._respond("OK:FB:%d:%d:%d" % (out_w, out_h, chunks))
+        import asyncio as _aio2
+        emitted, buf = 0, []
+        for yy in range(y0, y1):
+            row_start = yy * w + x0
+            for i in range(out_w):
+                buf.append("%08x" % mem32[base + (row_start + i) * 4])
+                if len(buf) == chunk:
+                    self._event("fb", seq=emitted, argb="".join(buf))
+                    emitted += 1
+                    buf = []
+                    await _aio2.sleep_ms(0)
+        if buf:
+            self._event("fb", seq=emitted, argb="".join(buf))
 
     async def _cmd_echo(self):
         """SC-path echo probe: sends CMD_ECHO through the MemoryCard secure channel.
