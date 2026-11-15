@@ -151,6 +151,8 @@ class DeviceBench:
         self._lease()
 
     def _lease(self):
+        # release any stale hold first (ours or inherited), then acquire clean
+        sh(f"labgrid-client -x {COORDINATOR} -p {DEVICE_PLACE} release 2>/dev/null")
         proc = subprocess.run(
             ["labgrid-client", "-x", COORDINATOR, "-p", DEVICE_PLACE,
              "acquire"], capture_output=True, text=True, timeout=60)
