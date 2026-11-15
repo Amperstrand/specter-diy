@@ -3,7 +3,7 @@ Satochip applet for Satochip hardware wallet communication.
 Inherits from SecureAppletBase for secure channel functionality.
 """
 from .secure_applet_base import SecureAppletBase
-from .applet import ISOException, AppletException
+from .applet import ISOException, AppletException, CardStateError
 from binascii import hexlify
 
 
@@ -31,15 +31,55 @@ class SatochipApplet(SecureAppletBase):
     def __init__(self, connection):
         """Initialize with card connection."""
         super().__init__(connection, self.AID)
+        self.protocol_version = None
+        self.card_status = None
         print("[Satochip] Applet initialized")
+
+    def detect_protocol_version(self):
+        """Plaintext GET_STATUS (INS 0x3C) probe -> (major, minor).
+
+        Wire truth (Toporin SatochipApplet tags v0.14-0.1, v0.14-0.2,
+        v0.16-0.1 read 2026-11-15): v0.14 and v0.16 share the SAME secure
+        channel (INS 0x81/0x82, HMAC-SHA160 sc_key/sc_mac KDF, odd-IV
+        counter, PKCS#7) — there is NO channel split between protocol
+        generations. What differs is command surface (0x6F/0x6E removed
+        in v0.16; factory reset 0xFD is v0.16-only; UnblockPIN format).
+        Version-gate those, never the channel.
+        """
+        resp_data, sw1, sw2 = self.get_card_status()
+        if (sw1, sw2) != (0x90, 0x00):
+            from .applet import ISOException
+            raise ISOException("{:02x}{:02x}".format(sw1, sw2))
+        self.card_status = self.parse_status(bytes(resp_data))
+        if "protocol_major_version" not in self.card_status:
+            print("[Satochip] GET_STATUS too short for a version — "
+                  "version gating disabled")
+            return None
+        self.protocol_version = (
+            self.card_status["protocol_major_version"],
+            self.card_status["protocol_minor_version"],
+        )
+        print("[Satochip] card protocol %d.%02d" % self.protocol_version)
+        return self.protocol_version
+
+    def init_secure_channel(self):
+        self.detect_protocol_version()
+        super().init_secure_channel()
 
     def factory_reset(self):
         """Reset the card to factory defaults (INS 0xFD, applet v0.16+).
 
         Single APDU P1=0xAA P2=0x55 over the secure channel, PIN not
-        required. Wipes keys, seed, label and PIN. Requires applet protocol
-        0.16; older applets reject the P1/P2 combination.
+        required. Requires applet protocol 0.16; v0.14 cards answer
+        6D00 (INS unknown) — the v0.14 reset path is PIN+PUK exhaustion.
         """
+        if self.protocol_version is None:
+            self.detect_protocol_version()
+        if self.protocol_version is not None and self.protocol_version < (0, 16):
+            raise AppletException(
+                "factory_reset requires applet protocol 0.16; card is "
+                "%d.%02d (v0.14 reset = PIN+PUK exhaustion)"
+                % self.protocol_version)
         apdu = bytes([self.CLA, self.INS_FACTORY_RESET, 0xAA, 0x55])
         print("[Satochip] TX (encrypted): FACTORY_RESET")
         self.secure_request(apdu)
@@ -123,11 +163,21 @@ class SatochipApplet(SecureAppletBase):
 
         depth = len(path) // 4
         p2 = 0x00 if for_signing else 0x40
-        
+
         apdu = bytes([self.CLA, self.INS_BIP32_GET_EXTENDED_KEY, depth, p2, len(path)]) + path
         print("[Satochip] TX (encrypted): GET_EXTENDED_KEY depth=", depth)
-        
-        resp = self.secure_request(apdu)
+
+        try:
+            resp = self.secure_request(apdu)
+        except CardStateError as e:
+            # 9c01 = key cache full -> retry with the no-cache bit (0x80),
+            # pysatochip CardConnector.py:1272-1280 behavior
+            if not str(e.args[0]).startswith("9c01"):
+                raise
+            apdu = bytes([self.CLA, self.INS_BIP32_GET_EXTENDED_KEY,
+                          depth, p2 | 0x80, len(path)]) + path
+            print("[Satochip] key cache full — retrying with P2 no-cache bit")
+            resp = self.secure_request(apdu)
         print("[Satochip] Extended key response:", len(resp), "bytes")
 
         if len(resp) < 66:
