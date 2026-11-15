@@ -80,3 +80,31 @@ wasn't sim/hardware skew, it was an untested API on both.
 Fix (proven in the specter-diy-sim worktree): replace the lazy loader with
 an eager import loop — old-VM-safe, zero regressions (33+19 green).
 The TestMode Lock shim (v2.2.10) stays as belt-and-suspenders.
+
+## The USB autosuspend trap (root-caused 2026-11-15)
+
+**The single biggest source of false recoveries.** Linux USB autosuspend
+(`power/control=auto, power/autosuspend=2` on the ST-Link V2.1) suspends the
+USB device after 2s of serial idle. When the console daemon's select() reports
+the fd ready, the USB device is still waking up — read() returns 0 bytes,
+pyserial raises "device reports readiness but returned no data", and error
+clusters break the campaign's silence threshold, firing the recovery ladder.
+
+**Fix** (installed, survives reboot):
+- udev rule: `/etc/udev/rules.d/99-stlink-no-suspend.rules` matching
+  `idVendor=0483, idProduct=374b` → `power/control=on, power/autosuspend=3600`
+- Any USB-serial bench device with the same symptom: check
+  `cat /sys/bus/usb/devices/<bus-pref>/power/control` — "auto" + short
+  autosuspend = this trap. Set to "on" + long timeout.
+
+**How to diagnose** (took us 868 errors and 18 recoveries to nail):
+1. Count errors: `grep -c "err: device" <console-log>` — if constant regardless
+   of hardware activity, it's not your device, it's the OS.
+2. Correlate with injections: if <10% of errors are near fault-injection events,
+   the cause is environmental, not test-induced.
+3. Check power state: `cat /sys/bus/usb/devices/<dev>/power/{control,autosuspend}`
+4. Fix the RIGHT device (lsusb to confirm bus position — ours was 3-1, not 3-2).
+
+**Impact on campaign data**: 92% of port errors were this. After the fix: zero
+errors in sustained monitoring. The recovery ladder stays as insurance for real
+wedges only (vcc injection failures, firmware crashes). The WDT handles hangs.
