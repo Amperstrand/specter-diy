@@ -70,3 +70,14 @@ falls back to reading a stale console log).
   the timestamp-correlation heuristic.
 - CI ladder (dry+sim per PR; device nightly on a self-hosted runner).
 - Review with full details: `evidence/2026-11-15/tiers-review.md`.
+
+## vpcd tier (designed 2026-11-15; build pending its own session)
+
+The bench already runs production vpcd infrastructure (ifd-modemifd eSIM
+work: libifdvpcd-amperstrand.so + the vsmartcard protocol, see
+worktrees/ifd-modemifd/vpcd-audit/tests/hardware/VPCD-ARCHITECTURE.md).
+The javacard vpcd tier = a host-side virtual card speaking the vpcd
+protocol to pcscd, answering APDUs from RECORDED card transcripts
+(fixtures/device.jsonl via --record) — dry-tier speed with pcscd-protocol
+realism and zero physical card. Escalation: transcripts → live relay to
+the CardMan (bless-gated) → physical device.
