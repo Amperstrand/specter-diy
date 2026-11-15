@@ -139,6 +139,17 @@ class TestMode:
         import asyncio
 
         self.running = True
+        # v2.2.17: pin the asyncio resolution at boot — the vendored v3.0.0
+        # (frozen, has Lock) vs the builtin extmod uasyncio (no Lock) shadowing
+        # question caused the v2.2.6c-v2.2.9 silence; surface it on the console
+        try:
+            import asyncio as _ai
+            _a = getattr(_ai, "__version__", "?")
+            self.uart and self.uart.write(
+                b"[TestMode] asyncio v%s Lock=%s\r\n" % (str(_a).encode(), str(hasattr(_ai, "Lock")).encode()))
+        except Exception:
+            pass
+
         # v2.2.15: hardware watchdog — the command loop is the bench health
         # proxy; if it stops feeding for 30s (hang, GC crawl, blocking op),
         # the IWDG reboots the board cleanly instead of leaving a wedge.
