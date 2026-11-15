@@ -68,6 +68,29 @@ reconstruct the byte stream before parsing. Assembler:
 evidence/2026-11-14/fb-assemble.py. Stray chunk losses happen if other
 commands race the dump — send NOTHING else during a dump.
 
+## Host tooling (2026-11-15 — conwrt-bench/tools/, all offline-tested)
+
+- **fb_capture.py** supersedes fb-assemble.py: dedicated capture file (not
+  the live log), geometry from the OK:FB header, explicit missing/extra
+  chunk report, `--rotate`, `--allow-partial`. Verified pixel-exact vs
+  fb-menu-gapless.png.
+- **screen_assert.py** — masked golden-diff + black/frozen health checks
+  for FB PNGs (photos are evidence, never assertions).
+- **f469-watchdog.sh** — systemd timer (monitor-only until
+  /tmp/opencode/f469-watchdog.armed): HB-stall → usbreset → openocd
+  re-attach → gated `reset run` (place-free + WATCHDOG_ALLOW_TARGET_RESET)
+  → CRITICAL = manual unplug (latch-up class). journald = the log.
+- **f469-blame.sh** — one command names the failing layer (host/link/
+  firmware/card/bench); `--probe` adds the TEST_STATUS discriminator.
+- **evidence-file.py** + **s20-shot.sh** — manifested evidence dirs out of
+  /tmp; scripted adb screencap (PNG magic+IEND verified).
+- **validate-exporter.py** — pre-restart check (exit-0 across all five
+  exporter configs; s20-camera stanza normalized to AndroidADDDevice in
+  SSOT, applies at the next sanctioned restart).
+- Tiered harness: test/integration/tiers/ (--backend=dry|sim|cardman|device,
+  needs/needs_any markers, labgrid lease fail-closed). Review with the
+  scale-out plan: evidence/2026-11-15/tiers-review.md.
+
 ## The asyncio resolution — FULLY RESOLVED (2026-11-15)
 
 The vendored libs/common/asyncio (v3.0.0) exports Lock/Event via a lazy
