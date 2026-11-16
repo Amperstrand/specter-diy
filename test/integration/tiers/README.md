@@ -99,3 +99,30 @@ The full client stack against REAL applet classes with zero physical card:
   connects with bounded retries, never fail-fast.
 - Original transcript-replay design (recorded card transcripts via
   `--record`) remains a future refinement on top of this transport.
+
+## Satochip version-aware testing (2026-11-16)
+
+The vpcd tier supports version-specific Satochip testing via `--applet-version`:
+
+```bash
+# Target specific versions in the version farm
+pytest test_satochip_versions.py --backend=vpcd --applet-version=sato-v0.14-0.2
+pytest test_satochip_versions.py --backend=vpcd --applet-version=sato-v0.16-0.1
+
+# Default (no version = v0.16 reader, skips SecureApplet-specific tests)
+pytest --backend=vpcd
+```
+
+Version detection: `satochip_get_status()` reads GET_STATUS (INS 0x3C, plaintext)
+which returns the protocol + applet version. The VpcdBench automatically
+dispatches to the correct channel (SecureApplet vs Satochip) based on the AID.
+
+## Satochip vs SecureApplet channel differences
+
+| | SecureApplet (MemoryCard family) | Satochip (v0.11+) |
+|---|---|---|
+| SC bootstrap | INS 0xB2-0xB7 (original protocol) | INS 0x81 (ECDH + HMAC-SHA1) |
+| Transport | INS 0xB6 (secure message) | INS 0x82 (encrypted request) |
+| KDF | sha256('host_aes'+secret) ×4 | HMAC-SHA1(shared, 'sc_key') ×2 |
+| Status | CMD_PIN (0x03) via SC | GET_STATUS (0x3C) plaintext |
+| PIN | CMD_PIN subcommands | INS 0x20 (VerifyPIN) via SC |
