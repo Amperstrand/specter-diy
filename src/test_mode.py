@@ -214,14 +214,20 @@ class TestMode:
                         await asyncio.sleep_ms(0)
 
                 # Poll UART3 VCP for HIL testing (hardware only).
-                # readline() can return a partial line if the full
-                # command hasn't arrived at 115200 baud (truncates
-                # 64-char hex sighashes). A 10ms yield before reading
-                # lets the UART buffer the complete line.
+                # readline() can split long commands (74+ chars) if the
+                # last bytes haven't arrived when it fires. Read, then
+                # if the line is newline-terminated read again — long
+                # commands arrive as 2 chunks at 115200 baud.
                 if not platform.simulator and self.uart and self.uart.any():
                     try:
-                        await asyncio.sleep_ms(20)
                         line = self.uart.readline()
+                        if line and not line.endswith(b'\n'):
+                            await asyncio.sleep_ms(5)
+                            n = self.uart.any()
+                            if n:
+                                more = self.uart.read(n)
+                                if more:
+                                    line = line + more
                         if line:
                             cmd_str = line.decode().strip()
                             if cmd_str.startswith('TEST_'):
