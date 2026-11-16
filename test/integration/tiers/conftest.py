@@ -262,13 +262,45 @@ class VpcdBench:
     name = "vpcd"
     provides = {"logic", "card", "card-mock"}
 
-    READER = os.environ.get("TIER_VPCD_READER", "jCardSim VPCD 00 00")
-    AID = os.environ.get("TIER_VPCD_AID", "B00B5111FF01")
+    # Version farm: maps version names to (reader_name, aid_hex)
+    FARM_VERSIONS = {
+        "sato-v0.6-0.3":   ("Farm sato-v0.6-0-3", "5361746f43686970"),
+        "sato-v0.7-0.1":   ("Farm sato-v0.7-0-1", "5361746f43686970"),
+        "sato-v0.7-0.2":   ("Farm sato-v0.7-0-2", "5361746f43686970"),
+        "sato-v0.8-0.1":   ("Farm sato-v0.8-0-1", "5361746f43686970"),
+        "sato-v0.9-0.1":   ("Farm sato-v0.9-0-1", "5361746f43686970"),
+        "sato-v0.10-0.1":  ("Farm sato-v0.10-0-1", "5361746f43686970"),
+        "sato-v0.10-0.4":  ("Farm sato-v0.10-0-4", "5361746f43686970"),
+        "sato-v0.11":      ("Farm sato-v0.11", "5361746f43686970"),
+        "sato-v0.12":      ("Farm sato-v0.12", "5361746f43686970"),
+        "sato-v0.14-0.1":  ("Farm sato-v0.14-0-1", "5361746f43686970"),
+        "sato-v0.14-0.2":  ("Farm sato-v0.14-0-2", "5361746f43686970"),
+        "sato-v0.15-0.0":  ("Farm sato-v0.15-0-0", "5361746f43686970"),
+        "sato-v0.15-0.1":  ("Farm sato-v0.15-0-1", "5361746f43686970"),
+        "sato-v0.16-0.1":  ("Farm sato-v0.16-0.1", "5361746f43686970"),
+        "v016":            ("jCardSim VPCD v016", "5361746f43686970"),
+        "v014":            ("jCardSim VPCD 00 01", "5361746f43686970"),
+        "sk-v0.1":         ("Farm sk-v0.1", "536565644b6565706572"),
+        "sk-v0.2-0.1":     ("Farm sk-v0.2-0.1", "536565644b6565706572"),
+        "mc-current":      ("Farm mc-current", "4d656d6f727943617264"),
+        "secure-current":  ("Farm secure-current", "4d656d6f727943617264"),
+    }
+
+    def _resolve_reader_aid(self, applet_version):
+        """Pick reader + AID from --applet-version or env vars."""
+        if applet_version and applet_version in self.FARM_VERSIONS:
+            reader, aid = self.FARM_VERSIONS[applet_version]
+            return reader + " 00 00", aid
+        # default: the working v016 reader (the base jCardSim VPCD lost its
+        # pcscd slot to the driver-dedup issue after the farm deploy)
+        return (os.environ.get("TIER_VPCD_READER", "jCardSim VPCD v016 00 00"),
+                os.environ.get("TIER_VPCD_AID", "5361746f43686970"))
     JAVACARD_TESTS = os.environ.get(
         "TIER_SPECTER_JAVACARD",
         "/home/ubuntu/src/specter-javacard/tests/tests")
 
-    def __init__(self):
+    def __init__(self, applet_version=None):
+        self.READER, self.AID = self._resolve_reader_aid(applet_version)
         if self.JAVACARD_TESTS not in sys.path:
             sys.path.insert(0, self.JAVACARD_TESTS)
         self.conn = self._connect()
@@ -396,6 +428,10 @@ def pytest_addoption(parser):
     parser.addoption("--sign-count", type=int, default=8)
     parser.addoption("--record", action="store_true",
                      help="capture device replies into dry-tier fixtures")
+    parser.addoption("--applet-version", default=None,
+                     help="target a specific applet version in the version farm "
+                          "(e.g. v0.14-0.2, v0.16-0.1, sk-v0.2-0.1, mc-current). "
+                          "Overrides TIER_VPCD_READER/AID env vars.")
 
 
 @pytest.fixture(scope="session")
@@ -408,7 +444,7 @@ def backend(request):
     elif tier == "cardman":
         yield CardManBench()
     elif tier == "vpcd":
-        yield VpcdBench()
+        yield VpcdBench(request.config.getoption("--applet-version"))
     elif tier == "device":
         b = DeviceBench()
         try:
