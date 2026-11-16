@@ -220,7 +220,7 @@ class TestMode:
                 # lets the UART buffer the complete line.
                 if not platform.simulator and self.uart and self.uart.any():
                     try:
-                        await asyncio.sleep_ms(10)
+                        await asyncio.sleep_ms(20)
                         line = self.uart.readline()
                         if line:
                             cmd_str = line.decode().strip()
