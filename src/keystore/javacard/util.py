@@ -173,9 +173,12 @@ def handle_pin_iso_exception(e, pin_attempts_max=5):
         return (None, True, PinError("Invalid PIN!"))
     
     # Satochip/SeedKeeper ISO status words
-    # Card is bricked - no more attempts
+    # 9C0C / 6983: PIN blocked — PUK-recoverable, NOT a wipe signal (fp#5)
     if err_str == "9c0c" or err_str == "6983":
-        return (0, True, CriticalErrorWipeImmediately("No more PIN attempts!\nWipe!"))
+        return (0, True, PinError(
+            "PIN blocked! Use your PUK code to unblock the card.\n"
+            "The card is NOT wiped — it can be recovered with the PUK."
+        ))
     
     # Wrong PIN: SW = 63Cx where x = remaining attempts
     if err_str.startswith("63c") and len(err_str) == 4:
@@ -192,6 +195,13 @@ def handle_pin_iso_exception(e, pin_attempts_max=5):
             )
         return (None, True, PinError("Invalid PIN!"))
     
+    # SeedKeeper v0.2: PUK exhausted → card wipes itself to factory (0xFF00)
+    if err_str == "ff00":
+        return (0, True, PinError(
+            "Card was reset to factory defaults!\n"
+            "All secrets have been erased. Re-import from your backup."
+        ))
+
     # Unknown error - re-raise original exception
     return (None, True, e)
 from binascii import hexlify
