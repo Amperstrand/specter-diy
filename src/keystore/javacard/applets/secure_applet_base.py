@@ -73,14 +73,15 @@ class SecureAppletBase(Applet):
         """
         version = self._detect_protocol_version()
         if version and version[0] == 0 and version[1] < 11:
-            # pre-v0.11: the original channel (INS 0xB2-0xB7)
-            # TODO: wire the original SecureChannel from securechannel.py
-            raise AppletException(
-                "Pre-v0.11 applet (protocol %d.%d) — original channel "
-                "not yet wired" % version)
-        # v0.11+: SeedKeeper-style channel (INS 0x81/0x82)
-        print("[" + str(self.NAME) + "] Establishing secure channel..."
-              + (" (protocol %d.%d)" % version if version else ""))
+            # pre-v0.11: the original channel (INS 0xB2-0xB7, sha256 KDF)
+            from .legacy_channel_adapter import LegacyChannelAdapter
+            self.sc = LegacyChannelAdapter()
+            print("[" + str(self.NAME) + "] Establishing legacy secure channel"
+                  + " (protocol %d.%d)" % version)
+        else:
+            # v0.11+: SeedKeeper-style channel (INS 0x81/0x82, HMAC-SHA1 KDF)
+            print("[" + str(self.NAME) + "] Establishing secure channel..."
+                  + (" (protocol %d.%d)" % version if version else ""))
         self.sc.initiate(self.conn)
         print("[" + str(self.NAME) + "] Secure channel established")
     
