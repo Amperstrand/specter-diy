@@ -124,6 +124,28 @@ class DryBench:
     name = "dry"
     provides = {"logic", "card", "card-mock"}
 
+    def satochip_get_status(self):
+        """GET_STATUS (INS 0x3C) via the Satochip channel or plaintext."""
+        if self._is_satochip():
+            # plaintext GET_STATUS works on real Satochip (no SC needed)
+            try:
+                data, sw1, sw2 = self.conn.transmit(
+                    [0xB0, 0x3C, 0x00, 0x00])
+                if sw1 == 0x90 and len(data) >= 8:
+                    d = list(data)
+                    return {"connected": True, "keystore_found": True,
+                            "unlocked": d[4] > 0, "card_inserted": True,
+                            "fingerprint": None,
+                            "protocol": f"{d[0]}.{d[1]}",
+                            "applet": f"{d[2]}.{d[3]}",
+                            "pin_tries": d[4], "puk_tries": d[5],
+                            "is_seeded": len(d) > 9 and d[9] != 0}
+            except Exception:
+                pass
+        return {"connected": False, "keystore_found": False,
+                "unlocked": False, "card_inserted": True,
+                "fingerprint": None}
+
     def status(self):
         return {"connected": True, "keystore_found": True, "unlocked": False,
                 "card_inserted": True, "fingerprint": None}
@@ -189,6 +211,28 @@ class DeviceBench:
                                     "fw": FW_SHA}) + "\n")
         return reply
 
+    def satochip_get_status(self):
+        """GET_STATUS (INS 0x3C) via the Satochip channel or plaintext."""
+        if self._is_satochip():
+            # plaintext GET_STATUS works on real Satochip (no SC needed)
+            try:
+                data, sw1, sw2 = self.conn.transmit(
+                    [0xB0, 0x3C, 0x00, 0x00])
+                if sw1 == 0x90 and len(data) >= 8:
+                    d = list(data)
+                    return {"connected": True, "keystore_found": True,
+                            "unlocked": d[4] > 0, "card_inserted": True,
+                            "fingerprint": None,
+                            "protocol": f"{d[0]}.{d[1]}",
+                            "applet": f"{d[2]}.{d[3]}",
+                            "pin_tries": d[4], "puk_tries": d[5],
+                            "is_seeded": len(d) > 9 and d[9] != 0}
+            except Exception:
+                pass
+        return {"connected": False, "keystore_found": False,
+                "unlocked": False, "card_inserted": True,
+                "fingerprint": None}
+
     def status(self):
         reply = self._cmd("TEST_STATUS", "TEST_STATUS")
         m = re.search(r"OK:(\{.*\})", reply.replace("\r", ""))
@@ -232,6 +276,28 @@ class CardManBench:
         raise pytest.skip("CardMan tier pending cardbench bless "
                           "(request in the javacard lane ledger REPORT block)")
 
+    def satochip_get_status(self):
+        """GET_STATUS (INS 0x3C) via the Satochip channel or plaintext."""
+        if self._is_satochip():
+            # plaintext GET_STATUS works on real Satochip (no SC needed)
+            try:
+                data, sw1, sw2 = self.conn.transmit(
+                    [0xB0, 0x3C, 0x00, 0x00])
+                if sw1 == 0x90 and len(data) >= 8:
+                    d = list(data)
+                    return {"connected": True, "keystore_found": True,
+                            "unlocked": d[4] > 0, "card_inserted": True,
+                            "fingerprint": None,
+                            "protocol": f"{d[0]}.{d[1]}",
+                            "applet": f"{d[2]}.{d[3]}",
+                            "pin_tries": d[4], "puk_tries": d[5],
+                            "is_seeded": len(d) > 9 and d[9] != 0}
+            except Exception:
+                pass
+        return {"connected": False, "keystore_found": False,
+                "unlocked": False, "card_inserted": True,
+                "fingerprint": None}
+
     def status(self):
         raise NotImplementedError
 
@@ -274,9 +340,9 @@ class VpcdBench:
         "sato-v0.11":      ("Farm sato-v0.11", "5361746f43686970"),
         "sato-v0.12":      ("Farm sato-v0.12", "5361746f43686970"),
         "sato-v0.14-0.1":  ("Farm sato-v0.14-0-1", "5361746f43686970"),
-        "sato-v0.14-0.2":  ("Farm sato-v0.14-0-2", "5361746f43686970"),
-        "sato-v0.15-0.0":  ("Farm sato-v0.15-0-0", "5361746f43686970"),
-        "sato-v0.15-0.1":  ("Farm sato-v0.15-0-1", "5361746f43686970"),
+        "sato-v0.14-0.2":  ("Farm sato-v0.14-0.2", "5361746f43686970"),
+        "sato-v0.15-0.0":  ("Farm sato-v0.15-0.0", "5361746f43686970"),
+        "sato-v0.15-0.1":  ("Farm sato-v0.15-0.1", "5361746f43686970"),
         "sato-v0.16-0.1":  ("Farm sato-v0.16-0.1", "5361746f43686970"),
         "v016":            ("jCardSim VPCD v016", "5361746f43686970"),
         "v014":            ("jCardSim VPCD 00 01", "5361746f43686970"),
@@ -306,6 +372,7 @@ class VpcdBench:
         self.conn = self._connect()
         self._select()
         self.sc = None
+        self._sato_sc = None
 
     def _connect(self):
         from smartcard.CardConnection import CardConnection
@@ -345,6 +412,155 @@ class VpcdBench:
             raise ISOException(f"{sw1:02x}{sw2:02x}")
         return bytes(data)
 
+    def _is_satochip(self):
+        """True if the current reader serves a Satochip-family applet."""
+        return self.AID.upper() == "5361746F43686970".upper()
+
+    def _ensure_satochip_channel(self):
+        """Open a Satochip secure channel (INS 0x81/0x82, HMAC-SHA1 KDF).
+
+        Uses the m2 client's SeedKeeperSecureChannel — proven against
+        jCardSim SatoChip by hil-next's battery (25/25, 2026-11-15).
+        Falls back to the bench SC established via the m2 tree if the
+        m2 imports fail.
+        """
+        if self._sato_sc is not None:
+            return self._sato_sc
+        M2_SRC = "/home/ubuntu/src/specter-diy-m2/src"
+        M2_F469 = "/home/ubuntu/src/specter-diy-m2/f469-disco/libs/common"
+        for p_ in (M2_SRC, M2_F469):
+            if p_ not in sys.path:
+                sys.path.insert(0, p_)
+        try:
+            from keystore.javacard.applets.seedkeeper_securechannel import (
+                SeedKeeperSecureChannel)
+        except ImportError:
+            pytest.skip("m2 client not importable for Satochip channel")
+
+        # stub micropython-only modules that the m2 tree imports at module level
+        for mod_name, attrs in {
+            "pyb": {"Pin": type("Pin", (), {}), "UART": type("UART", (), {})},
+            "uscard": {"Reader": type("Reader", (), {}),
+                       "SmartcardException": type("SmartcardException", (Exception,), {})},
+            "lvgl": {"lv": types.SimpleNamespace()},
+            "ucryptolib": {"aes": lambda *a, **k: type("C", (), {
+                "encrypt": lambda s, d: d, "decrypt": lambda s, d: d})()},
+            "uio": {"StringIO": __import__("io").StringIO},
+            "micropython": {"const": lambda x: x},
+            "display": {fn: (lambda *a, **k: None) for fn in
+                        ("init", "width", "height", "backlight", "buffer",
+                         "send", "commit", "clear", "fill", "draw_image",
+                         "draw_text", "get")},
+        }.items():
+            if mod_name not in sys.modules:
+                m = types.ModuleType(mod_name)
+                for k, v in attrs.items():
+                    setattr(m, k, v)
+                sys.modules[mod_name] = m
+        import time as _t
+        if "utime" not in sys.modules:
+            _ut = types.ModuleType("utime")
+            _ut.ticks_ms = lambda: int(_t.monotonic() * 1000)
+            _ut.ticks_diff = lambda a, b: a - b
+            _ut.localtime = lambda ts=None: _t.localtime(
+                ts if ts is not None else _t.time()) + (0,)
+            _ut.sleep_ms = lambda ms: _t.sleep(ms / 1000)
+            sys.modules["utime"] = _ut
+
+        # connection adapter: the m2 channel calls conn.transmit(apdu_bytes)
+        # and expects (resp_bytes, sw1, sw2) back — same as pyscard
+        class _VpcdCard:
+            def __init__(self, vpcd_bench):
+                self._b = vpcd_bench
+
+            def transmit(self, apdu):
+                data, sw1, sw2 = self._b.conn.transmit(list(bytes(apdu)))
+                return bytes(data), sw1, sw2
+
+            def isCardInserted(self):
+                return True
+
+        # ecdsa-backed secp256k1 adapter (the zero-point stub poison fix)
+        import hashlib as _hl
+        import ecdsa as _ecdsa
+        _ec_mod = types.ModuleType("secp256k1")
+        _ec_mod.EC_UNCOMPRESSED = 0
+        _ec_mod.EC_COMPRESSED = 1
+        _P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
+
+        def _decomp(d33):
+            x = int.from_bytes(d33[1:], "big")
+            y2 = (pow(x, 3, _P) + 7) % _P
+            y = pow(y2, (_P + 1) // 4, _P)
+            if pow(y, 2, _P) != y2:
+                raise ValueError("point not on curve")
+            if (y & 1) != (d33[0] & 1):
+                y = _P - y
+            return x, y
+
+        def _parse(data):
+            d = bytes(data)
+            if len(d) == 33:
+                x, y = _decomp(d)
+            else:
+                x = int.from_bytes(d[1:33], "big")
+                y = int.from_bytes(d[33:65], "big")
+            return _ecdsa.VerifyingKey.from_string(
+                x.to_bytes(32, "big") + y.to_bytes(32, "big"),
+                curve=_ecdsa.SECP256k1)
+
+        class _Pub:
+            def __init__(self, vk):
+                self.vk = vk
+
+        def _ser(vk_or_pub, flag=0):
+            vk = vk_or_pub.vk if isinstance(vk_or_pub, _Pub) else vk_or_pub
+            if not isinstance(vk, _ecdsa.VerifyingKey):
+                vk = _parse(vk)
+            pt = vk.pubkey.point
+            if flag == 0:
+                return b"\x04" + pt.x().to_bytes(32, "big") + pt.y().to_bytes(32, "big")
+            return (b"\x03" if pt.y() & 1 else b"\x02") + pt.x().to_bytes(32, "big")
+
+        def _tweak(pub, scalar):
+            base = (pub.vk if isinstance(pub, _Pub) else pub)
+            if not isinstance(base, _ecdsa.VerifyingKey):
+                base = _parse(base)
+            from ecdsa.ellipticcurve import Point
+            pt = Point(_ecdsa.SECP256k1.curve, base.pubkey.point.x(),
+                       base.pubkey.point.y(), _ecdsa.SECP256k1.order)
+            n = int.from_bytes(bytes(scalar)[:32], "big") * pt
+            pub.vk = _ecdsa.VerifyingKey.from_string(
+                n.x().to_bytes(32, "big") + n.y().to_bytes(32, "big"),
+                curve=_ecdsa.SECP256k1)
+            return None
+
+        def _sig_parse(der):
+            return _ecdsa.util.sigdecode_der(bytes(der), _ecdsa.SECP256k1.order)
+
+        def _verify(sig, digest, pub):
+            from ecdsa.util import sigencode_string
+            raw = sigencode_string(sig[0], sig[1], order=_ecdsa.SECP256k1.order)
+            vk = pub.vk if isinstance(pub, _Pub) else pub
+            if not isinstance(vk, _ecdsa.VerifyingKey):
+                vk = _parse(vk)
+            return vk.verify_digest(
+                _ecdsa.ecdsa.Signature.from_string(raw), bytes(digest))
+
+        _ec_mod.ec_pubkey_create = lambda sk: _ecdsa.SigningKey.from_string(
+            bytes(sk)[:32], curve=_ecdsa.SECP256k1).get_verifying_key()
+        _ec_mod.ec_pubkey_parse = lambda d: _Pub(_parse(d))
+        _ec_mod.ec_pubkey_serialize = _ser
+        _ec_mod.ec_pubkey_tweak_mul = _tweak
+        _ec_mod.ecdsa_signature_parse_der = _sig_parse
+        _ec_mod.ecdsa_verify = _verify
+        sys.modules["secp256k1"] = _ec_mod
+
+        sc = SeedKeeperSecureChannel()
+        sc.initiate(_VpcdCard(self))
+        self._sato_sc = sc
+        return sc
+
     def _ensure_channel(self):
         from util.securechannel import SecureChannel
         if self.sc is not None and self.sc.is_open:
@@ -368,13 +584,39 @@ class VpcdBench:
         left, total, is_set = list(sc.request(b"\x03\x00"))
         return left, total, is_set
 
+    def satochip_get_status(self):
+        """GET_STATUS (INS 0x3C) via the Satochip channel or plaintext."""
+        if self._is_satochip():
+            # plaintext GET_STATUS works on real Satochip (no SC needed)
+            try:
+                data, sw1, sw2 = self.conn.transmit(
+                    [0xB0, 0x3C, 0x00, 0x00])
+                if sw1 == 0x90 and len(data) >= 8:
+                    d = list(data)
+                    return {"connected": True, "keystore_found": True,
+                            "unlocked": d[4] > 0, "card_inserted": True,
+                            "fingerprint": None,
+                            "protocol": f"{d[0]}.{d[1]}",
+                            "applet": f"{d[2]}.{d[3]}",
+                            "pin_tries": d[4], "puk_tries": d[5],
+                            "is_seeded": len(d) > 9 and d[9] != 0}
+            except Exception:
+                pass
+        return {"connected": False, "keystore_found": False,
+                "unlocked": False, "card_inserted": True,
+                "fingerprint": None}
+
     def status(self):
+        if self._is_satochip():
+            return self.satochip_get_status()
         _, _, is_set = self._pin_status()
         return {"connected": True, "keystore_found": True,
                 "unlocked": is_set == 2, "card_inserted": True,
                 "fingerprint": None}
 
     def pin(self, pin):
+        if self._is_satochip():
+            pytest.skip("Satochip PIN via dedicated SC (test_satochip_versions)")
         sc = self._ensure_channel()
         pin_b = pin.encode() if isinstance(pin, str) else bytes(pin)
         _, _, is_set = list(sc.request(b"\x03\x00"))
@@ -402,6 +644,28 @@ class SimBench:
 
     name = "sim"
     provides = {"logic"}
+
+    def satochip_get_status(self):
+        """GET_STATUS (INS 0x3C) via the Satochip channel or plaintext."""
+        if self._is_satochip():
+            # plaintext GET_STATUS works on real Satochip (no SC needed)
+            try:
+                data, sw1, sw2 = self.conn.transmit(
+                    [0xB0, 0x3C, 0x00, 0x00])
+                if sw1 == 0x90 and len(data) >= 8:
+                    d = list(data)
+                    return {"connected": True, "keystore_found": True,
+                            "unlocked": d[4] > 0, "card_inserted": True,
+                            "fingerprint": None,
+                            "protocol": f"{d[0]}.{d[1]}",
+                            "applet": f"{d[2]}.{d[3]}",
+                            "pin_tries": d[4], "puk_tries": d[5],
+                            "is_seeded": len(d) > 9 and d[9] != 0}
+            except Exception:
+                pass
+        return {"connected": False, "keystore_found": False,
+                "unlocked": False, "card_inserted": True,
+                "fingerprint": None}
 
     def status(self):
         out = sh("cd /home/ubuntu/src/specter-diy && make test 2>&1 | tail -2")

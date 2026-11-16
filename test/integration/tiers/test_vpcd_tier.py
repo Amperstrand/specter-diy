@@ -18,6 +18,13 @@ def _vpcd_only(backend):
 
 @pytest.mark.needs("card")
 class TestVpcdBridge:
+    """SecureApplet-specific bridge tests — skip when serving Satochip."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_satochip(self, backend):
+        if hasattr(backend, '_is_satochip') and backend._is_satochip():
+            pytest.skip("SecureApplet bridge tests (Satochip applet active — "
+                        "run test_satochip_versions.py instead)")
     def test_atr_is_j3r180_shape(self, backend):
         _vpcd_only(backend)
         atr = bytes(backend.conn.getATR()).hex().upper()

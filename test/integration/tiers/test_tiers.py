@@ -22,6 +22,11 @@ class TestBenchStatus:
 
 @pytest.mark.needs_any("card-real", "card-mock")
 class TestPinFlow:
+
+    @pytest.fixture(autouse=True)
+    def _skip_satochip(self, backend):
+        if hasattr(backend, '_is_satochip') and backend._is_satochip():
+            pytest.skip("SecureApplet PIN flow (Satochip uses different SC)")
     def test_pin_flow_unlocks(self, backend):
         r = backend.pin("1234")
         assert ("OK" in r) or ("6984" in r) or ("6e00" in r), r
