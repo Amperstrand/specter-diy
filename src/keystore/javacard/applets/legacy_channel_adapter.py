@@ -72,7 +72,7 @@ class LegacyChannelAdapter:
                 if (sw1, sw2) != (0x90, 0x00):
                     from .applet import ISOException
                     raise ISOException(
-                        f"{sw1:02x}{sw2:02x}")
+                        "%02x%02x" % (sw1, sw2))
                 return bytes(data)
 
         self._channel = SecureChannel(_ConnAdapter(connection))
