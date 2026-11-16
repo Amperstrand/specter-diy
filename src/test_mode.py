@@ -34,6 +34,7 @@ class TestMode:
         self.specter = specter_ref  # Reference to Specter instance
         self.running = False
         self._current_source = 'stdin'  # Track command source for response routing
+        self._uart_rxbuf = b""  # accumulate until newline (uart.readline() truncates long commands)
         
         # Initialize UART3 VCP for HIL testing on hardware only
         # UART3 uses PB10 (TX) / PB11 (RX) - ST-Link Virtual COM Port
@@ -214,11 +215,17 @@ class TestMode:
                         await asyncio.sleep_ms(0)
 
                 # Poll UART3 VCP for HIL testing (hardware only)
+                # Line-buffered: uart.readline() returns partial data if
+                # the full command hasn't arrived yet (truncates 64-char
+                # hex sighashes to ~32 chars at 115200 baud). Accumulate
+                # and split on newline instead.
                 if not platform.simulator and self.uart and self.uart.any():
                     try:
-                        line = self.uart.readline()
-                        if line:
-                            cmd_str = line.decode().strip()
+                        self._uart_rxbuf += self.uart.read()
+                        while b'\n' in self._uart_rxbuf:
+                            raw, self._uart_rxbuf = \
+                                self._uart_rxbuf.split(b'\n', 1)
+                            cmd_str = raw.decode(errors='replace').strip()
                             if cmd_str.startswith('TEST_'):
                                 self._current_source = 'uart'
                                 self._current_cmd = cmd_str
