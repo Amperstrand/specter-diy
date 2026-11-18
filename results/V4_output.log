@@ -1,0 +1,7 @@
+[SeedKeeper] Applet initialized
+[BootTrace][SeedKeeper] ATR: 3B FA 18 00 00 81 31 FE 45 4A 54 61 78 43 6F 72 65 56 31 B2
+[BootTrace][SeedKeeper] connected using protocol: 2
+[SeedKeeper] Establishing secure channel...
+[SeedKeeper] Secure channel established
+[BootTrace][SeedKeeper] unlock() called
+[BootTrace][SeedKeeper] PIN attempts remaining: 5
