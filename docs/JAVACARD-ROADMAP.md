@@ -27,6 +27,11 @@ Framing: every deliverable is a **small, independently reviewable branch** — e
 | `feature/no-qspi-safemode` | Booting on boards with dead/missing external QSPI flash | paused, documented |
 | `feature/cap-installer` | Installing/uninstalling CAP files from within the firmware | not started (kept separate) |
 
+### Branch-maintenance status (2026-11-18, session H2 / ops#55)
+- **Owner doctrine 2026-11-18: no long-term fork — nothing merges to a fork master.** Experiment branches stay rebased on upstream (`bec1ab1`) + the CI-fix commit (`8c1d2fd`, ubuntu-26.04/gcc-15 survival) and are dogfooded. m1/m2 stack + drafts rebased green 2026-11-18 (heads `db4177c`/`ebc9356`/`7ced274`/`904dd66`/`bcda4d6`/`d058a3d`).
+- **Pin posture (status, decision open):** per-branch CI pins — m1 line `758b5c8` (T=1 + ci-unix-stack-budget combined, Amperstrand/f469-disco `t1-usart-ci-stack-budget`), m2 lines `6388913` (upstream + budget pointer); all device evidence to date used build-time repin `fe68368` (m1-gate-board line). The fe68368-in-tree-vs-build-time decision is the owner's and only matters for device flashing under the no-merge doctrine.
+- M2 hardware proofs (post-dating earlier mirrors): real-card 25/25 + PIN 3/3 (2026-11-15), device tier 4/4 + real zpub through the full stack on F469 (2026-11-16).
+
 ### Test & demo tiers
 | Piece | Enables | Status |
 |---|---|---|
