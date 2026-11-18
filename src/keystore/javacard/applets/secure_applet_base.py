@@ -1,0 +1,206 @@
+"""
+SecureAppletBase - Base class for applets using SeedKeeperSecureChannel.
+
+This class provides secure channel functionality for JavaCard applets
+that use the SeedKeeper/Satochip secure channel protocol (ECDH + AES-CBC + HMAC-SHA1).
+
+Both SeedKeeperApplet and SatochipApplet inherit from this class,
+eliminating duplicated secure_request() and init_secure_channel() implementations.
+"""
+from .applet import Applet, ISOException, AppletException, CardStateError
+from .seedkeeper_securechannel import SeedKeeperSecureChannel
+from binascii import hexlify
+
+
+class SecureAppletBase(Applet):
+    """
+    Base class for applets using SeedKeeperSecureChannel.
+    
+    This class provides:
+    - Secure channel initialization
+    - Secure request/response handling with automatic retry on 9c30
+    - Shared infrastructure for SeedKeeper and Satochip applets
+    
+    Subclasses must:
+    - Set AID class attribute
+    - Set NAME class attribute
+    - Implement applet-specific methods
+    """
+    
+    # Subclasses should override these
+    AID = None
+    NAME = "SecureAppletBase"
+    
+    def __init__(self, connection, aid=None):
+        """
+        Initialize secure applet with connection and AID.
+        
+        Args:
+            connection: Card connection object with transmit() method
+            aid: Applet AID (uses class AID if None)
+        """
+        if aid is None:
+            aid = self.AID
+        super().__init__(connection, aid)
+        # Secure channel instance
+        self.sc = SeedKeeperSecureChannel()
+    
+    def init_secure_channel(self):
+        """
+        Initialize secure channel with the card.
+        
+        Must be called after select() and before any secure commands.
+        
+        Note: SELECT MUST be called BEFORE init_secure_channel().
+        NEVER re-select after secure channel initialization.
+        """
+        print("[" + str(self.NAME) + "] Establishing secure channel...")
+        self.sc.initiate(self.conn)
+        print("[" + str(self.NAME) + "] Secure channel established")
+    
+    def _parse_transmit(self, data):
+        """Polymorphic transmit-result parser (tuple or bytes contract)."""
+        if isinstance(data[0], bytes):
+            return data[0], data[1], data[2]  # tuple: (resp, sw1, sw2)
+        return data[:-2], data[-2], data[-1]  # bytes: resp with SW appended
+
+    def secure_request(self, inner_apdu: bytes, retry: bool = True) -> bytes:
+        """
+        Send APDU via secure channel (INS 0x82).
+        
+        Encrypts the inner APDU, sends it to the card, and decrypts the response.
+        Automatically re-establishes secure channel on 9c30 error if retry=True.
+        
+        Args:
+            inner_apdu: The plaintext APDU to send
+            retry: If True, retry on 9c30 (secure channel corrupted)
+        
+        Returns:
+            Decrypted response data from the card
+        
+        Raises:
+            AppletException: If secure channel not initialized
+            ISOException: If card returns non-9000 status word
+        
+        Note:
+            The secure channel uses INS 0x82 for all encrypted commands.
+            The 9c30 error indicates the secure channel state is corrupted
+            (e.g., due to card reset or IV mismatch), requiring re-initialization.
+        """
+        if not self.sc.is_initialized:
+            raise AppletException("Secure channel not initialized")
+        
+        # Encrypt the inner APDU
+        encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
+        
+        # Transmit to card
+        data = self.conn.transmit(encrypted_apdu)
+        resp_data, sw1, sw2 = self._parse_transmit(data)
+        sw = bytes([sw1, sw2])
+
+        # 9c30 old re-init handler REMOVED (gatekeeper blocker #2):
+        # 9C30 is a SeedKeeper object lock — channel re-init cannot release it.
+        # The correct lock-busy handler is below in the SW remap section.
+
+        # Card-state failures: retrying or channel re-init cannot fix these.
+        # SW remap per pysaudit conformance audit (fp#5/#6).
+        if sw == b"\x9c\x06":
+            # fp#5: 9C06 = PIN required (session expired), NOT corrupted EEPROM.
+            # Correct action: re-verify PIN, not physical reinsertion.
+            raise CardStateError(
+                "9c06: PIN verification required - the card session may have"
+                " expired. Re-enter your PIN and try again."
+            )
+        if sw == b"\x9c\x01":
+            raise CardStateError(
+                "9c01: no memory left - card EEPROM is full. Delete secrets"
+                " or reset the card to factory defaults."
+            )
+        if sw == b"\x9c\x0c":
+            # 9C0C = PIN blocked. PUK-recoverable (INS 0x46), NOT a wipe signal.
+            raise CardStateError(
+                "9c0c: PIN blocked. Use your PUK code to unblock the card."
+                " The card is NOT wiped - it can be recovered with the PUK."
+            )
+        if sw == b"\x9c\x30":
+            # fp#6: 9C30 = SeedKeeper object-lock busy, NOT a channel error.
+            # Channel re-init cannot release an object lock; retry the same op.
+            raise CardStateError(
+                "9c30: card operation lock busy - the previous operation may"
+                " still be completing. Retry the same operation."
+            )
+        if sw == b"\x9c\x20" or sw == b"\x9c\x21" or sw == b"\x9c\x22" or sw == b"\x9c\x23":
+            # Channel errors: one bounded re-init + retry is the correct action.
+            if retry:
+                print("[" + str(self.NAME) + "] Channel error ("
+                      + hexlify(sw).decode() + "), re-establishing...")
+                self.sc.initiate(self.conn)
+                encrypted_apdu = self.sc.encrypt_apdu(inner_apdu)
+                data = self.conn.transmit(encrypted_apdu)
+                resp_data, sw1, sw2 = self._parse_transmit(data)
+                sw = bytes([sw1, sw2])
+            else:
+                raise ISOException(hexlify(sw).decode())
+
+        # Check final status word
+        if sw != b"\x90\x00":
+            raise ISOException(hexlify(sw).decode())
+        
+        # Decrypt and return response (if any data)
+        if len(resp_data) > 0:
+            return self.sc.decrypt_response(resp_data)
+        return b''
+    
+    def is_secure_channel_open(self) -> bool:
+        """
+        Check if secure channel is initialized and ready.
+        
+        Returns:
+            True if secure channel can be used for commands
+        """
+        return self.sc.is_initialized
+    def close_secure_channel(self):
+        """
+        Close the secure channel.
+        
+        Should be called when done with the card to reset state.
+        """
+        self.sc.is_initialized = False
+        self.sc.aes_key = None
+        self.sc.mac_key = None
+        self.sc.iv_counter = 1
+    
+    def change_pin(self, old_pin, new_pin):
+        """
+        Change the card PIN code.
+        
+        APDU: INS 0x44 with old_pin and new_pin
+        Requires secure channel and unlocked card.
+        
+        Args:
+            old_pin: Current PIN code (string or bytes)
+            new_pin: New PIN code (string or bytes)
+        
+        Raises:
+            AppletException: If card is locked or PIN change fails
+            ISOException: If card returns error status word
+        """
+        if isinstance(old_pin, str):
+            old_pin = old_pin.encode()
+        if isinstance(new_pin, str):
+            new_pin = new_pin.encode()
+        
+        # Validate PIN lengths (typically 4-16 bytes)
+        if len(old_pin) < 4 or len(old_pin) > 16:
+            raise AppletException("Old PIN must be 4-16 characters")
+        if len(new_pin) < 4 or len(new_pin) > 16:
+            raise AppletException("New PIN must be 4-16 characters")
+        
+        # Build APDU: CLA INS P1 P2 Lc [old_pin_len(1) | old_pin | new_pin_len(1) | new_pin]
+        # Using CLA=0xB0, INS=0x44 (CHANGE_PIN)
+        apdu_data = bytes([len(old_pin)]) + old_pin + bytes([len(new_pin)]) + new_pin
+        inner_apdu = bytes([0xB0, 0x44, 0x00, 0x00, len(apdu_data)]) + apdu_data
+        
+        print("[" + str(self.NAME) + "] TX (encrypted): CHANGE_PIN")
+        self.secure_request(inner_apdu)
+        print("[" + str(self.NAME) + "] PIN changed successfully")

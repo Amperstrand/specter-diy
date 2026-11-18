@@ -7,6 +7,15 @@ class ISOException(Exception):
     pass
 
 
+class CardStateError(ISOException):
+    """Card-side state failure (SW 9c01 EEPROM full, 9c06 unauthorized-after-
+    PIN). Retrying or re-establishing the secure channel cannot fix these;
+    if they persist the card may need physical removal and reinsertion
+    (issue #22: corrupted EEPROM object manager after rapid import/delete)."""
+
+    pass
+
+
 class AppletException(Exception):
     pass
 
