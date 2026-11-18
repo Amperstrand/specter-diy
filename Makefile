@@ -75,12 +75,19 @@ debug: $(TARGET_DIR) mpy-cross $(MPY_DIR)/ports/stm32 git-info
 
 
 # unixport (simulator)
+# MPY_UNIX_NLR: ubuntu-26.04+ toolchains (gcc-15/binutils-2.46) corrupt the
+# vendored x86-64 asm NLR (garbage nlr.ret_val -> segfaults in the exception
+# machinery); the portable setjmp NLR fixes it. Unix-only: the define must
+# NOT reach mpy-cross or the bare-metal firmware build (no libc setjmp).
+# The f469-disco pin carries the matching unix-port stack-budget bump.
+MPY_UNIX_NLR = -DMICROPY_NLR_SETJMP=1
+
 unix: $(TARGET_DIR) mpy-cross $(MPY_DIR)/ports/unix git-info
 	@echo Building binary with frozen files
 	make -C $(MPY_DIR)/ports/unix \
         USER_C_MODULES=$(USER_C_MODULES) \
         FROZEN_MANIFEST=$(FROZEN_MANIFEST_UNIX) \
-        CFLAGS_EXTRA="$(MPY_CFLAGS)" && \
+        CFLAGS_EXTRA="$(MPY_CFLAGS) $(MPY_UNIX_NLR)" && \
 	cp $(MPY_DIR)/ports/unix/micropython $(TARGET_DIR)/micropython_unix
 
 simulate: unix
