@@ -216,3 +216,38 @@ continues fine — only smartcard reader infrastructure is blocked.
 
 **Diagnostic**: `sudo dmesg | grep "1-6" | grep -E "error|fail|timeout"` —
 if you see error -110 or -71 on bus 1-6, the F469's USB CDC is dead.
+
+## Labgrid-coordinated USB operations (2026-11-18)
+
+ALL USB-touching operations go through `labgrid-usb-gate.sh`:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ labgrid-usb-gate.sh                                    │
+├────────────────────────────────────────────────────────┤
+│ 1. Check F469 USB CDC is healthy (not dead)           │
+│ 2. Check console daemon is STOPPED                    │
+│ 3. Kill vicc adapters (prevent TCP blocks)            │
+│ 4. Acquire labgrid place (exclusive access)           │
+│ 5. Perform the operation (pcscd restart / farm deploy)│
+│ 6. Release the place                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+Commands:
+- `labgrid-usb-gate.sh check` — health check + place state
+- `labgrid-usb-gate.sh console-start` — acquire place → start daemon
+- `labgrid-usb-gate.sh console-stop` — stop daemon → release place
+- `labgrid-usb-gate.sh start-pcscd` — full safety sequence → pcscd restart
+- `labgrid-usb-gate.sh deploy-farm` — full safety sequence → farm deploy
+
+The console daemon is now labgrid-integrated:
+- Acquires `f469-specter-film` on startup
+- Releases on shutdown (via atexit)
+- systemd service runs a health check before starting
+
+This means:
+- pcscd CANNOT restart while the console daemon holds the place
+- Farm deployment CANNOT proceed while another lane holds the place
+- USB health is checked BEFORE any operation that could wedge the kernel
+- All coordination is visible through the labgrid coordinator
