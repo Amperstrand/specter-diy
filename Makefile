@@ -5,7 +5,14 @@ USER_C_MODULES ?= ../../../usermods
 MPY_DIR ?= f469-disco/micropython
 EMBIT_INIT ?= f469-disco/libs/common/embit/src/embit/__init__.py
 ifeq ($(shell uname),Linux)
-    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch
+    # NLR_SETJMP for the unix port: the asm NLR (nlrx64.c) restores
+    # callee-saved registers to push-time values on catch, but gcc>=14
+    # may cache exception-path state (nlr.ret_val) across nlr_push in
+    # those registers -> stale NULL/garbage at exception_handler ->
+    # SIGSEGV on any exception delivered from a C callee (e.g. the
+    # frozen-import-smoke; proven gcc-14.2 vs gcc-13, bench 2026-11-20).
+    # setjmp-based NLR makes the catch compiler-visible and conservative.
+    MPY_CFLAGS ?= -Wno-dangling-pointer -Wno-enum-int-mismatch -DMICROPY_NLR_SETJMP=1
 else
     MPY_CFLAGS ?=
 endif
