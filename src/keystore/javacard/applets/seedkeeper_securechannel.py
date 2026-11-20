@@ -8,7 +8,15 @@ RFC 2104: HMAC = H(K XOR opad || H(K XOR ipad || text))
 
 import hashlib
 import secp256k1
-from ucryptolib import aes
+try:
+    from ucryptolib import aes
+except ImportError:
+    # ucryptolib requires MICROPY_PY_USSL which is 0 on this build;
+    # the scard usermod's AES or a future hardware-AES binding covers this.
+    # The secure channel is only used when a Satochip card is actually
+    # detected at runtime, so a missing AES module at import time is
+    # non-fatal — it fails loudly when channel operations are attempted.
+    aes = None
 from rng import get_random_bytes
 
 

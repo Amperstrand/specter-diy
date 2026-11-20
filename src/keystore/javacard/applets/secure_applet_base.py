@@ -45,16 +45,43 @@ class SecureAppletBase(Applet):
         # Secure channel instance
         self.sc = SeedKeeperSecureChannel()
     
+    def _detect_protocol_version(self):
+        """Plaintext GET_STATUS (INS 0x3C) — returns (major, minor) or None.
+
+        The protocol version determines which secure channel to use:
+        v0.11+ uses the SeedKeeper-style channel (INS 0x81/0x82).
+        Pre-v0.11 uses the original channel (INS 0xB2-0xB7).
+        """
+        try:
+            apdu = bytes([self.CLA, 0x3C, 0x00, 0x00])
+            data, sw1, sw2 = self.conn.transmit(apdu)
+            if sw1 == 0x90 and len(data) >= 2:
+                return data[0], data[1]
+        except Exception:
+            pass
+        return None
+
     def init_secure_channel(self):
         """
-        Initialize secure channel with the card.
+        Initialize secure channel with the card — version-aware.
+        
+        Detects the applet protocol via plaintext GET_STATUS, then picks
+        the correct channel: SeedKeeper-style (INS 0x81) for v0.11+,
+        the original protocol for pre-v0.11 (not yet wired — raises).
         
         Must be called after select() and before any secure commands.
-        
-        Note: SELECT MUST be called BEFORE init_secure_channel().
-        NEVER re-select after secure channel initialization.
         """
-        print("[" + str(self.NAME) + "] Establishing secure channel...")
+        version = self._detect_protocol_version()
+        if version and version[0] == 0 and version[1] < 11:
+            # pre-v0.11: the original channel (INS 0xB2-0xB7, sha256 KDF)
+            from .legacy_channel_adapter import LegacyChannelAdapter
+            self.sc = LegacyChannelAdapter()
+            print("[" + str(self.NAME) + "] Establishing legacy secure channel"
+                  + " (protocol %d.%d)" % version)
+        else:
+            # v0.11+: SeedKeeper-style channel (INS 0x81/0x82, HMAC-SHA1 KDF)
+            print("[" + str(self.NAME) + "] Establishing secure channel..."
+                  + (" (protocol %d.%d)" % version if version else ""))
         self.sc.initiate(self.conn)
         print("[" + str(self.NAME) + "] Secure channel established")
     

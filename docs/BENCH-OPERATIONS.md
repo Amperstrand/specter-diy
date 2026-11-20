@@ -163,3 +163,91 @@ Protocol: commands via FIFO, responses on console log as JSON events.
 Heartbeat: `[TestMode] HB` every ~10s = healthy loop.
 Boot banner: `[TestMode] ALIVE T5` right after task creation.
 Asyncio probe: `[TestMode] asyncio v(3,0,0) Lock=False` on boot (v2.17+).
+
+## CRITICAL: The F469 USB CDC wedge (root-caused 2026-11-18)
+
+**What happens**: The F469 board's native USB CDC port (enabled by D8
+`pyb.usb_mode("VCP")` in boot.py) can become unresponsive when accessed
+concurrently by multiple processes. When it dies, the kernel USB subsystem
+cascades: any process that scans USB (pcscd's libusb, lsusb, etc.) gets
+stuck in D-state (uninterruptible sleep) permanently. This requires a host
+reboot to clear.
+
+**The chain**:
+1. F469's USB CDC (device f055:9800, "Pyboard Virtual Comm Port") goes dead
+2. Kernel tries to communicate → timeout → retry → "Device not responding"
+3. pcscd restarts → libusb scans ALL USB devices → hits the dead F469 port
+4. pcscd blocks in D-state → holds kernel USB locks → never releases
+5. Every subsequent pcscd start adds another D-state zombie
+
+**Symptoms**: pcscd won't start ("Failed to establish context"), lsusb hangs,
+D-state processes accumulate. All non-USB work (dry tier, sim, native tests)
+continues fine — only smartcard reader infrastructure is blocked.
+
+**PREVENTION RULES**:
+
+1. **NEVER restart pcscd while the console daemon is reading the F469 VCP.**
+   Stop the console daemon first: `systemctl --user stop f469-console.service`
+
+2. **Before ANY pcscd restart**: check that the F469's USB CDC is responsive:
+   ```
+   ls /sys/bus/usb/devices/1-6/ >/dev/null 2>&1 && echo "USB OK" || echo "USB DEAD — DO NOT restart pcscd"
+   ```
+
+3. **The console daemon should be stopped before any version farm deployment
+   or pcscd config change.** The deploy-full-farm.sh script MUST include:
+   ```
+   systemctl --user stop f469-console.service
+   # ... deploy farm, restart pcscd ...
+   systemctl --user start f469-console.service
+   ```
+
+4. **Kill vicc adapters BEFORE stopping pcscd** (prevents TCP connection
+   blocks): `tmux list-sessions | grep farm- | cut -d: -f1 | xargs -I{} tmux kill-session -t {}`
+
+5. **If the F469's USB CDC is already dead**: do NOT restart pcscd. The kernel
+   USB locks will wedge. Instead: close the console daemon, unplug the F469's
+   USB cable, wait 5s, replug. If D-state processes already exist: only a host
+   reboot clears them.
+
+6. **Consider making D8 (native USB CDC) conditional** — the ST-Link VCP
+   (if02) is on a separate USB bus and does NOT have this problem. The board's
+   native USB is a convenience feature that creates a fragile dependency.
+
+**Diagnostic**: `sudo dmesg | grep "1-6" | grep -E "error|fail|timeout"` —
+if you see error -110 or -71 on bus 1-6, the F469's USB CDC is dead.
+
+## Labgrid-coordinated USB operations (2026-11-18)
+
+ALL USB-touching operations go through `labgrid-usb-gate.sh`:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ labgrid-usb-gate.sh                                    │
+├────────────────────────────────────────────────────────┤
+│ 1. Check F469 USB CDC is healthy (not dead)           │
+│ 2. Check console daemon is STOPPED                    │
+│ 3. Kill vicc adapters (prevent TCP blocks)            │
+│ 4. Acquire labgrid place (exclusive access)           │
+│ 5. Perform the operation (pcscd restart / farm deploy)│
+│ 6. Release the place                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+Commands:
+- `labgrid-usb-gate.sh check` — health check + place state
+- `labgrid-usb-gate.sh console-start` — acquire place → start daemon
+- `labgrid-usb-gate.sh console-stop` — stop daemon → release place
+- `labgrid-usb-gate.sh start-pcscd` — full safety sequence → pcscd restart
+- `labgrid-usb-gate.sh deploy-farm` — full safety sequence → farm deploy
+
+The console daemon is now labgrid-integrated:
+- Acquires `f469-specter-film` on startup
+- Releases on shutdown (via atexit)
+- systemd service runs a health check before starting
+
+This means:
+- pcscd CANNOT restart while the console daemon holds the place
+- Farm deployment CANNOT proceed while another lane holds the place
+- USB health is checked BEFORE any operation that could wedge the kernel
+- All coordination is visible through the labgrid coordinator

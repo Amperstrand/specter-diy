@@ -1,0 +1,14 @@
+# Labgrid environment for the F469 tier harness
+# Usage: pytest --lg-env test/integration/tiers/labgrid-env.yaml
+targets:
+  f469:
+    resources:
+      RemotePlace:
+        name: f469-specter-film
+    drivers:
+      SerialDriver: {}
+  version-farm:
+    resources:
+      RemotePlace:
+        name: version-farm
+    drivers: {}

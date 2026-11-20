@@ -175,7 +175,10 @@ class DeviceBench:
         self._lease()
 
     def _lease(self):
-        # release any stale hold first (ours or inherited), then acquire clean
+        # Go through the USB gate — checks health, coordinates with console daemon
+        gate = "/home/ubuntu/conwrt-bench/tools/labgrid-usb-gate.sh"
+        result = sh(f"bash {gate} console-stop 2>/dev/null")
+        # Then acquire clean
         sh(f"labgrid-client -x {COORDINATOR} -p {DEVICE_PLACE} release 2>/dev/null")
         proc = subprocess.run(
             ["labgrid-client", "-x", COORDINATOR, "-p", DEVICE_PLACE,
