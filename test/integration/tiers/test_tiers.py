@@ -9,7 +9,7 @@ import re
 import pytest
 
 
-@pytest.mark.needs("logic")
+@pytest.mark.needs("card")
 class TestBenchStatus:
     def test_card_connected(self, backend):
         st = backend.status()

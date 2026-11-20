@@ -38,6 +38,11 @@ DEVICE_PLACE = "f469-specter-film"
 FIFO = "/tmp/opencode/f469-console.in"
 CONSOLE_LOG = "/tmp/opencode/f469-console.log"
 
+# Repo root (tiers/ lives at <root>/test/integration/tiers) — portable
+# across bench worktrees and CI checkouts, unlike a hardcoded bench path.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                         "..", "..", ".."))
+
 LOG_LINE_RE = re.compile(r"^(\S+)\s+b('.*')\s*$")
 REPLY_WAIT_S = 30
 RECORD = False
@@ -429,8 +434,10 @@ class VpcdBench:
         """
         if self._sato_sc is not None:
             return self._sato_sc
-        M2_SRC = "/home/ubuntu/src/specter-diy-m2/src"
-        M2_F469 = "/home/ubuntu/src/specter-diy-m2/f469-disco/libs/common"
+        M2_SRC = os.environ.get("TIER_M2_SRC",
+                                "/home/ubuntu/src/specter-diy-m2/src")
+        M2_F469 = os.environ.get("TIER_M2_F469",
+                                 "/home/ubuntu/src/specter-diy-m2/f469-disco/libs/common")
         for p_ in (M2_SRC, M2_F469):
             if p_ not in sys.path:
                 sys.path.insert(0, p_)
@@ -671,7 +678,7 @@ class SimBench:
                 "fingerprint": None}
 
     def status(self):
-        out = sh("cd /home/ubuntu/src/specter-diy && make test 2>&1 | tail -2")
+        out = sh(f"cd {REPO_ROOT} && make test 2>&1 | tail -2")
         return {"sim_suite": "OK" in out, "connected": None,
                 "unlocked": None, "card_inserted": None, "fingerprint": None}
 

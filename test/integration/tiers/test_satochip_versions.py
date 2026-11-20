@@ -15,6 +15,8 @@ class TestSatochipVersion:
     def test_get_status_reports_version(self, backend, request):
         if backend.name != "vpcd":
             pytest.skip("version farm tests (run with --backend=vpcd)")
+        if not backend._is_satochip():
+            pytest.skip("Satochip AID required for GET_STATUS version test")
         st = backend.satochip_get_status()
         assert st["connected"], f"GET_STATUS failed: {st}"
         assert "protocol" in st and st["protocol"], "no protocol version"
