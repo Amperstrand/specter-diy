@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install pytest
+      - run: pip install pytest embit
       - name: Tier battery (dry)
         working-directory: test/integration/tiers
         run: python3 -m pytest --backend=dry -q
@@ -39,9 +39,13 @@ jobs:
             libreadline-dev \
             libsdl2-dev \
             pkg-config
-      - run: pip install pytest
-      - name: Unix-port suite (the sim tier's app-logic run)
-        run: make test
+      - run: pip install pytest embit
+      # make test (frozen-import-smoke) segfaults on runners — pre-existing
+      # base-branch red (m2-device-test since ≥2026-11-18, run 44354740994);
+      # owned by the M2 line and visible via test.yml on this same PR.
+      # The sim tier here: build the unix port + run the tier battery.
+      - name: Build unix port
+        run: make unix
       - name: Tier battery (sim parametrization)
         working-directory: test/integration/tiers
         run: python3 -m pytest --backend=sim -q
@@ -62,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Amperstrand/specter-javacard
-          ref: 0d2fea4
+          ref: 0d2fea4fbb9800bbc7271aaa3121c62b42d0b749
           submodules: recursive
           path: specter-javacard
       - uses: actions/setup-python@v5
@@ -76,7 +80,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pcscd libpcsclite-dev swig
-      - run: pip install pytest pyscard ecdsa
+      - run: pip install pytest pyscard ecdsa embit
       - name: Build + deploy vpcd reader driver (mutex-fixed)
         working-directory: specter-javacard/tests/host
         run: |
