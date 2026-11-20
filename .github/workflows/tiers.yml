@@ -113,6 +113,20 @@ jobs:
             'LIBPATH /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim-v016.so' \
             'CHANNELID 0x8C87' \
             | sudo tee /etc/reader.conf.d/vpcd-jcardsim-v016 >/dev/null
+      - name: Allow runner user through pcscd polkit
+        # pcscd authorizes clients via polkit; the default policy admits
+        # only active local sessions, so a CI user gets 0x8010006A
+        # (SCARD_W_SECURITY_VIOLATION) at SCardEstablishContext. This rule
+        # opens both pcsc-lite actions — fine on a single-purpose runner.
+        run: |
+          printf '%s\n' \
+            'polkit.addRule(function(action, subject) {' \
+            '  if (action.id == "org.debian.pcsc-lite.access_pcsc" ||' \
+            '      action.id == "org.debian.pcsc-lite.access_card") {' \
+            '    return polkit.Result.YES;' \
+            '  }' \
+            '});' \
+            | sudo tee /etc/polkit-1/rules.d/49-ci-allow-pcscd.rules >/dev/null
       - name: Start pcscd + vicc adapters
         working-directory: specter-javacard/tests/tests/util
         run: |
