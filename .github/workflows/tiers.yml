@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Amperstrand/specter-javacard
-          ref: 0e2517a08e03d6b019af8834f44edf740cd80e1c
+          ref: 2cbb13f0237422d396031742a4912f21683bda90
           submodules: recursive
           path: specter-javacard
       - uses: actions/setup-python@v5
