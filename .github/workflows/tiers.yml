@@ -1,0 +1,148 @@
+name: tiers
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pytest
+      - name: Tier battery (dry)
+        working-directory: test/integration/tiers
+        run: python3 -m pytest --backend=dry -q
+
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libffi-dev \
+            libgmp-dev \
+            libreadline-dev \
+            libsdl2-dev \
+            pkg-config
+      - run: pip install pytest
+      - name: Unix-port suite (the sim tier's app-logic run)
+        run: make test
+      - name: Tier battery (sim parametrization)
+        working-directory: test/integration/tiers
+        run: python3 -m pytest --backend=sim -q
+
+  vpcd:
+    runs-on: ubuntu-latest
+    env:
+      # bench defaults point at /home/ubuntu/src/... — redirect to the CI checkout
+      TIER_SPECTER_JAVACARD: ${{ github.workspace }}/specter-javacard/tests/tests
+      TIER_M2_SRC: ${{ github.workspace }}/src
+      TIER_M2_F469: ${{ github.workspace }}/f469-disco/libs/common
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # pinned bench-proven commit of the javacard tree (vicc adapter, driver
+      # build, applet sources, committed simulator.jar) — bump deliberately
+      - uses: actions/checkout@v4
+        with:
+          repository: Amperstrand/specter-javacard
+          ref: 0d2fea4
+          submodules: recursive
+          path: specter-javacard
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pcscd + driver build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pcscd libpcsclite-dev swig
+      - run: pip install pytest pyscard ecdsa
+      - name: Build + deploy vpcd reader driver (mutex-fixed)
+        working-directory: specter-javacard/tests/host
+        run: |
+          ./build_libifdvpcd_jcardsim.sh build
+          sudo ./build_libifdvpcd_jcardsim.sh deploy
+          sudo ./build_libifdvpcd_jcardsim.sh setup
+      - name: Compile applet classes for jCardSim
+        working-directory: specter-javacard
+        run: |
+          javac --release 8 -nowarn \
+            -cp sdks/jc304_kit/lib/api_classic.jar -d build/classes/Secure \
+            src/main/java/toys/SecureApplet.java \
+            src/main/java/toys/SecureChannel.java \
+            src/main/java/toys/Crypto.java \
+            src/main/java/toys/HMACDigest.java \
+            src/main/java/toys/Secp256k1.java \
+            src/main/java/toys/TransientHeap.java \
+            src/main/java/toys/FiniteField.java \
+            src/main/java/toys/PinCode.java
+          tests/host/build_satochip_farm.sh
+      - name: Second reader stanza (SatoChip v0.16 on port 35975)
+        # per-stanza .so copy: ifd-vpcd's ctx[] is library-global and pcscd
+        # caches dlopen by LIBPATH — shared stanzas clobber each other
+        run: |
+          sudo cp /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim.so \
+            /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim-v016.so
+          printf '%s\n' \
+            'FRIENDLYNAME "jCardSim VPCD v016"' \
+            'DEVICENAME /dev/null:0x8C87' \
+            'LIBPATH /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim-v016.so' \
+            'CHANNELID 0x8C87' \
+            | sudo tee /etc/reader.conf.d/vpcd-jcardsim-v016 >/dev/null
+      - name: Start pcscd + vicc adapters
+        working-directory: specter-javacard/tests/tests/util
+        run: |
+          sudo systemctl restart pcscd
+          sleep 2
+          nohup python3 vicc.py \
+            --vpcd-port 35973 --sim-port 6666 \
+            > /tmp/vicc-secure.log 2>&1 &
+          nohup python3 vicc.py \
+            --vpcd-port 35975 --sim-port 6668 \
+            --aid 5361746F43686970 --applet org.satochip.applet.Satochip \
+            --classdir Satochip-v0.16-0.1 \
+            > /tmp/vicc-sato16.log 2>&1 &
+          sleep 3
+          tail -n 5 /tmp/vicc-secure.log /tmp/vicc-sato16.log
+      - name: Tier battery (vpcd, SatoChip v0.16 — default reader)
+        working-directory: test/integration/tiers
+        run: python3 -m pytest --backend=vpcd -q
+      - name: Tier battery (vpcd, SecureApplet bridge)
+        working-directory: test/integration/tiers
+        env:
+          TIER_VPCD_READER: jCardSim VPCD
+          TIER_VPCD_AID: B00B5111FF01
+        run: python3 -m pytest --backend=vpcd -q
+
+  # dormant until the bench self-hosted runner exists (P6/#43): add the
+  # `device-tier` label to a PR to run the device tier on the F469 seat
+  device:
+    if: contains(github.event.pull_request.labels.*.name, 'device-tier')
+    runs-on: [self-hosted, f469-bench]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Tier battery (device — labgrid-leased F469)
+        working-directory: test/integration/tiers
+        run: python3 -m pytest --backend=device -q
