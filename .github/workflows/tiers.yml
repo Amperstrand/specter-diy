@@ -86,7 +86,6 @@ jobs:
         run: |
           ./build_libifdvpcd_jcardsim.sh build
           sudo ./build_libifdvpcd_jcardsim.sh deploy
-          sudo ./build_libifdvpcd_jcardsim.sh setup
       - name: Compile applet classes for jCardSim
         working-directory: specter-javacard
         run: |
@@ -101,16 +100,26 @@ jobs:
             src/main/java/toys/FiniteField.java \
             src/main/java/toys/PinCode.java
           tests/host/build_satochip_farm.sh
-      - name: Second reader stanza (SatoChip v0.16 on port 35975)
-        # per-stanza .so copy: ifd-vpcd's ctx[] is library-global and pcscd
-        # caches dlopen by LIBPATH — shared stanzas clobber each other
+      - name: Reader stanzas (SecureApplet 0x8C85 + SatoChip v0.16 0x8C87)
+        # two rules: (1) per-stanza .so copy — ifd-vpcd's ctx[] is
+        # library-global and pcscd caches dlopen by LIBPATH, so shared
+        # stanzas clobber each other; (2) friendly names must NOT be
+        # substrings of each other — the tier's reader filter matches by
+        # substring and takes the first hit.
         run: |
-          sudo cp /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim.so \
-            /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim-v016.so
+          DRV=/usr/local/lib/pcsc/drivers/serial
+          sudo cp $DRV/libifdvpcd-jcardsim.so $DRV/libifdvpcd-jcardsim-secure.so
+          sudo cp $DRV/libifdvpcd-jcardsim.so $DRV/libifdvpcd-jcardsim-v016.so
+          printf '%s\n' \
+            'FRIENDLYNAME "jCardSim VPCD Secure"' \
+            'DEVICENAME /dev/null:0x8C85' \
+            "LIBPATH $DRV/libifdvpcd-jcardsim-secure.so" \
+            'CHANNELID 0x8C85' \
+            | sudo tee /etc/reader.conf.d/vpcd-jcardsim-secure >/dev/null
           printf '%s\n' \
             'FRIENDLYNAME "jCardSim VPCD v016"' \
             'DEVICENAME /dev/null:0x8C87' \
-            'LIBPATH /usr/local/lib/pcsc/drivers/serial/libifdvpcd-jcardsim-v016.so' \
+            "LIBPATH $DRV/libifdvpcd-jcardsim-v016.so" \
             'CHANNELID 0x8C87' \
             | sudo tee /etc/reader.conf.d/vpcd-jcardsim-v016 >/dev/null
       - name: Allow runner user through pcscd polkit
@@ -148,7 +157,7 @@ jobs:
       - name: Tier battery (vpcd, SecureApplet bridge)
         working-directory: test/integration/tiers
         env:
-          TIER_VPCD_READER: jCardSim VPCD
+          TIER_VPCD_READER: jCardSim VPCD Secure
           TIER_VPCD_AID: B00B5111FF01
         run: python3 -m pytest --backend=vpcd -q
 
