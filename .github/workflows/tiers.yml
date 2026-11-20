@@ -80,7 +80,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pcscd libpcsclite-dev swig
-      - run: pip install pytest pyscard ecdsa embit
+      - run: pip install pytest pyscard ecdsa embit cryptography
       - name: Build + deploy vpcd reader driver (mutex-fixed)
         working-directory: specter-javacard/tests/host
         run: |
